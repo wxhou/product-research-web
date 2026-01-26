@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { projectDb, searchResultDb, reportDb } from '@/lib/db';
-import { getSearchServiceManager } from '@/lib/search';
+import { getDataSourceManager, type SearchResult } from '@/lib/datasources';
 import { analyzeSearchResults, generateFullReport, type AnalysisResult } from '@/lib/analysis';
 
 function generateId(): string {
@@ -58,17 +58,17 @@ export async function POST(request: NextRequest) {
       status: 'processing',
     });
 
-    // 获取搜索服务管理器
-    const searchManager = getSearchServiceManager();
-    const enabledSources = searchManager.getEnabledSources();
+    // 获取数据源管理器
+    const sourceManager = getDataSourceManager();
+    const enabledSources = sourceManager.getEnabledSources();
 
     // 收集搜索结果
-    const allResults: any[] = [];
+    const allResults: SearchResult[] = [];
     for (const source of enabledSources) {
       try {
-        const results = await searchManager.search({
+        const results = await sourceManager.search({
           query: project.title,
-          source: source as any,
+          source,
           limit: 8,
         });
 
@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
             content: result.content,
             raw_data: JSON.stringify(result),
           });
-          allResults.push({ ...result, source });
+          allResults.push(result);
         }
       } catch (err) {
         console.error(`Error searching with ${source}:`, err);

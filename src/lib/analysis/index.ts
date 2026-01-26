@@ -10,7 +10,7 @@
  * 6. 完整报告生成
  */
 
-import type { SearchResult } from '../search';
+import type { SearchResult } from '../datasources';
 
 // 产品功能关键词映射
 const FEATURE_KEYWORDS: Record<string, string[]> = {

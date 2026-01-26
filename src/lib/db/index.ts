@@ -80,10 +80,15 @@ function initDatabase() {
 
   // 插入默认数据源
   const defaultSources = [
+    // 搜索 API
     { id: 'brave', name: 'Brave Search', type: 'brave', config: '{}' },
     { id: 'exa', name: 'Exa', type: 'exa', config: '{}' },
-    { id: 'firecrawl', name: 'Firecrawl', type: 'firecrawl', config: '{}' },
-    { id: 'context7', name: 'Context7', type: 'context7', config: '{}' },
+    { id: 'serper', name: 'Serper (Google)', type: 'serper', config: '{}' },
+    { id: 'duckduckgo', name: 'DuckDuckGo', type: 'duckduckgo', config: '{}' },
+    // RSS 订阅（免费）
+    { id: 'rss', name: 'RSS 订阅', type: 'rss', config: '{}' },
+    // 自定义 API
+    { id: 'http', name: '自定义 API', type: 'http', config: '{}' },
   ];
 
   const insertSource = db.prepare(`
