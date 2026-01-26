@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { projectDb, searchResultDb, reportDb } from '@/lib/db';
 import { getSearchServiceManager } from '@/lib/search';
+import { analyzeSearchResults, generateFullReport, type AnalysisResult } from '@/lib/analysis';
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -24,82 +25,6 @@ interface Report {
   mermaid_charts: string;
   version: number;
   created_at: string;
-}
-
-// 生成报告内容（简化版）
-function generateReportContent(project: Project, searchResults: any[]): string {
-  const keywords = JSON.parse(project.keywords || '[]');
-  const sources = [...new Set(searchResults.map((r: any) => r.source))];
-
-  return `# ${project.title}
-
-> 调研时间: ${new Date().toLocaleDateString()}
-> 关键词: ${keywords.join(', ')}
-
-## 摘要
-
-${project.description || '本报告通过调研全网产品信息，为您提供详细的产品分析和机会洞察。'}
-
-## 调研概览
-
-| 项目 | 数据 |
-|-----|------|
-| 调研产品数 | ${searchResults.length} |
-| 数据来源 | ${sources.join(', ')} |
-| 关键词 | ${keywords.join(', ')} |
-
-## 功能分析
-
-通过调研发现，以下功能是行业主流产品的核心能力：
-
-- **实时监测** - 几乎所有产品都具备的基础功能
-- **故障预测** - 预测性维护的核心价值体现
-- **预警告警** - 故障预警和通知机制
-- **工单管理** - 与运维流程集成
-
-## 竞品详情
-
-### 产品A
-- 提供完整的预测性维护解决方案
-- 支持多种数据源接入
-- 具备强大的分析能力
-
-### 产品B
-- 专注于特定行业应用
-- 具备良好的用户体验
-- 提供灵活的定制选项
-
-### 产品C
-- 性价比较高
-- 部署简单
-- 社区活跃
-
-## 机会清单
-
-1. **多模态感知融合** - 融合振动、温度、声音等多模态数据
-2. **边缘智能** - 在边缘端实现实时分析和决策
-3. **行业专用模型** - 训练垂直领域专用AI模型
-
-## 技术路线
-
-\`\`\`
-2020: 传统传感器监测
-2022: IoT普及应用
-2024: 边缘计算融合
-2026: AI大模型集成
-2028: 认知智能
-\`\`\`
-
-## 结论
-
-预测性维护市场正在快速增长，建议关注以下方向：
-- 与IoT技术的深度融合
-- AI算法的持续优化
-- 行业定制化解决方案
-
----
-*报告生成时间: ${new Date().toLocaleString()}*
-`;
 }
 
 // POST /api/research
@@ -144,7 +69,7 @@ export async function POST(request: NextRequest) {
         const results = await searchManager.search({
           query: project.title,
           source: source as any,
-          limit: 5,
+          limit: 8,
         });
 
         for (const result of results) {
@@ -166,15 +91,22 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 生成报告
-    const reportContent = generateReportContent(project, allResults);
+    // 分析搜索结果
+    const analysis: AnalysisResult = analyzeSearchResults(allResults, project.title);
+
+    // 生成完整报告
+    const reportContent = generateFullReport(project, allResults, analysis);
     const reportId = generateId();
+
+    // 保存 Mermaid 图表
+    const mermaidCharts = JSON.stringify(analysis.mermaidCharts);
+
     reportDb.create.run({
       id: reportId,
       project_id: projectId,
       title: `${project.title} - 调研报告`,
       content: reportContent,
-      mermaid_charts: JSON.stringify([]),
+      mermaid_charts: mermaidCharts,
     });
 
     // 更新项目状态为已完成
@@ -195,6 +127,12 @@ export async function POST(request: NextRequest) {
         project: finalProject,
         report: finalReport,
         searchResults: allResults,
+        analysis: {
+          features: analysis.features,
+          competitors: analysis.competitors,
+          swot: analysis.swot,
+          marketData: analysis.marketData,
+        },
       },
     });
   } catch (error) {

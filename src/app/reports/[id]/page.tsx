@@ -28,6 +28,7 @@ export default function ReportPage() {
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
   const mermaidRef = useRef<HTMLDivElement>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (reportId) {
@@ -94,6 +95,31 @@ export default function ReportPage() {
     if (report) {
       await navigator.clipboard.writeText(report.content);
       alert('已复制到剪贴板');
+    }
+  };
+
+  const handleSaveToFile = async () => {
+    if (!report) return;
+
+    setSaving(true);
+    try {
+      // 创建 Blob 并下载
+      const blob = new Blob([report.content], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const fileName = `产品调研-${report.title.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')}-${new Date().toISOString().slice(0, 10)}.md`;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      alert(`报告已保存到: ${fileName}`);
+    } catch (error) {
+      console.error('Failed to save report:', error);
+      alert('保存失败');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -204,6 +230,14 @@ export default function ReportPage() {
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
             </svg>
             复制 Markdown
+          </button>
+          <button className="btn btn-primary" onClick={handleSaveToFile} disabled={saving}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+              <polyline points="17 21 17 13 7 13 7 21" />
+              <polyline points="7 3 7 8 15 8" />
+            </svg>
+            {saving ? '保存中...' : '保存到文件'}
           </button>
         </div>
       </header>

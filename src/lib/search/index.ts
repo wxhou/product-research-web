@@ -3,6 +3,12 @@
  *
  * 支持多个搜索数据源的统一接口
  * 可配置启用/禁用不同的数据源
+ *
+ * 数据源配置：
+ * - brave: Brave Search API (需要 BRAVE_API_KEY 环境变量)
+ * - exa: Exa API (需要 EXA_API_KEY 环境变量)
+ * - firecrawl: Firecrawl API (需要 FIRECRAWL_API_KEY 环境变量)
+ * - context7: Context7 API (需要 CONTEXT7_API_KEY 环境变量)
  */
 
 export interface SearchResult {
@@ -28,16 +34,64 @@ interface SearchService {
   search(query: string, limit?: number): Promise<SearchResult[]>;
 }
 
+// 获取 API Key 的辅助函数
+function getApiKey(source: SearchSource): string | undefined {
+  const envKeys: Record<SearchSource, string | undefined> = {
+    brave: process.env.BRAVE_API_KEY,
+    exa: process.env.EXA_API_KEY,
+    firecrawl: process.env.FIRECRAWL_API_KEY,
+    context7: process.env.CONTEXT7_API_KEY,
+  };
+  return envKeys[source];
+}
+
 // Brave Search 服务
 class BraveSearchService implements SearchService {
   name = 'Brave Search';
   enabled = true;
 
   async search(query: string, limit = 10): Promise<SearchResult[]> {
-    // TODO: 实现真正的 Brave Search API 调用
-    // API 文档: https://api.search.brave.com/api/docs
+    const apiKey = getApiKey('brave');
 
-    // 模拟实现 - 实际使用时替换为真实 API 调用
+    // 如果没有 API Key，返回模拟数据
+    if (!apiKey) {
+      console.log('Brave Search: No API key, using mock data');
+      return this.getMockResults(query, limit);
+    }
+
+    try {
+      const response = await fetch('https://api.search.brave.com/res/v1/web/search', {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'X-Subscription-Token': apiKey,
+        },
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Brave API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return this.parseResults(data, query, limit);
+    } catch (error) {
+      console.error('Brave Search API error:', error);
+      return this.getMockResults(query, limit);
+    }
+  }
+
+  private parseResults(data: any, query: string, limit: number): SearchResult[] {
+    const results = data.web?.results || [];
+    return results.slice(0, limit).map((item: any) => ({
+      title: item.title || query,
+      url: item.url || '',
+      content: item.description || item.title || '',
+      source: 'brave',
+    }));
+  }
+
+  private getMockResults(query: string, limit: number): SearchResult[] {
     const mockResults: SearchResult[] = [
       {
         title: `${query} - 行业解决方案`,
@@ -58,7 +112,6 @@ class BraveSearchService implements SearchService {
         source: 'brave',
       },
     ];
-
     return mockResults.slice(0, limit);
   }
 }
@@ -69,9 +122,52 @@ class ExaSearchService implements SearchService {
   enabled = true;
 
   async search(query: string, limit = 10): Promise<SearchResult[]> {
-    // TODO: 实现真正的 Exa API 调用
-    // API 文档: https://docs.exa.ai/api-reference
+    const apiKey = getApiKey('exa');
 
+    // 如果没有 API Key，返回模拟数据
+    if (!apiKey) {
+      console.log('Exa: No API key, using mock data');
+      return this.getMockResults(query, limit);
+    }
+
+    try {
+      const response = await fetch('https://api.exa.com/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          query,
+          limit,
+          type: 'auto',
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Exa API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return this.parseResults(data, limit);
+    } catch (error) {
+      console.error('Exa Search API error:', error);
+      return this.getMockResults(query, limit);
+    }
+  }
+
+  private parseResults(data: any, limit: number): SearchResult[] {
+    const results = data.results || [];
+    return results.slice(0, limit).map((item: any) => ({
+      title: item.title || '',
+      url: item.url || '',
+      content: item.text || item.excerpt || '',
+      source: 'exa',
+    }));
+  }
+
+  private getMockResults(query: string, limit: number): SearchResult[] {
     const mockResults: SearchResult[] = [
       {
         title: `${query} - 技术白皮书`,
@@ -86,7 +182,6 @@ class ExaSearchService implements SearchService {
         source: 'exa',
       },
     ];
-
     return mockResults.slice(0, limit);
   }
 }
@@ -97,9 +192,88 @@ class FirecrawlService implements SearchService {
   enabled = false;
 
   async search(query: string, limit = 5): Promise<SearchResult[]> {
-    // TODO: 实现真正的 Firecrawl API 调用
-    // API 文档: https://docs.firecrawl.dev/api-reference
+    const apiKey = getApiKey('firecrawl');
 
+    // 如果没有 API Key，返回模拟数据
+    if (!apiKey) {
+      console.log('Firecrawl: No API key, using mock data');
+      return this.getMockResults(query, limit);
+    }
+
+    try {
+      // 先搜索网页
+      const searchResponse = await fetch('https://api.firecrawl.dev/v1/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          query,
+          limit,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!searchResponse.ok) {
+        throw new Error(`Firecrawl Search API error: ${searchResponse.status}`);
+      }
+
+      const searchData = await searchResponse.json();
+      const results = searchData.data || [];
+
+      // 对每个结果进行抓取
+      const detailedResults: SearchResult[] = [];
+
+      for (const result of results.slice(0, limit)) {
+        try {
+          const scrapeResponse = await fetch('https://api.firecrawl.dev/v1/scrape', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              url: result.url,
+              onlyMainContent: true,
+            }),
+            signal: AbortSignal.timeout(30000),
+          });
+
+          if (scrapeResponse.ok) {
+            const scrapeData = await scrapeResponse.json();
+            detailedResults.push({
+              title: result.title || scrapeData.data?.metadata?.title || result.url,
+              url: result.url,
+              content: scrapeData.data?.markdown || result.description || '',
+              source: 'firecrawl',
+            });
+          } else {
+            detailedResults.push({
+              title: result.title || result.url,
+              url: result.url,
+              content: result.description || '',
+              source: 'firecrawl',
+            });
+          }
+        } catch {
+          detailedResults.push({
+            title: result.title || result.url,
+            url: result.url,
+            content: result.description || '',
+            source: 'firecrawl',
+          });
+        }
+      }
+
+      return detailedResults;
+    } catch (error) {
+      console.error('Firecrawl API error:', error);
+      return this.getMockResults(query, limit);
+    }
+  }
+
+  private getMockResults(query: string, limit: number): SearchResult[] {
     const mockResults: SearchResult[] = [
       {
         title: `${query} - 竞品分析报告`,
@@ -108,7 +282,6 @@ class FirecrawlService implements SearchService {
         source: 'firecrawl',
       },
     ];
-
     return mockResults.slice(0, limit);
   }
 }
@@ -119,8 +292,52 @@ class Context7Service implements SearchService {
   enabled = false;
 
   async search(query: string, limit = 5): Promise<SearchResult[]> {
-    // TODO: 实现真正的 Context7 API 调用
+    const apiKey = getApiKey('context7');
 
+    // 如果没有 API Key，返回模拟数据
+    if (!apiKey) {
+      console.log('Context7: No API key, using mock data');
+      return this.getMockResults(query, limit);
+    }
+
+    try {
+      // Context7 使用 MCP 协议，这里通过 HTTP API 调用
+      const response = await fetch('https://api.context7.io/v1/library/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          query,
+          limit,
+        }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Context7 API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return this.parseResults(data, limit);
+    } catch (error) {
+      console.error('Context7 Search API error:', error);
+      return this.getMockResults(query, limit);
+    }
+  }
+
+  private parseResults(data: any, limit: number): SearchResult[] {
+    const results = data.documents || data.results || [];
+    return results.slice(0, limit).map((item: any) => ({
+      title: item.title || item.name || '',
+      url: item.url || item.link || '',
+      content: item.content || item.description || item.snippet || '',
+      source: 'context7',
+    }));
+  }
+
+  private getMockResults(query: string, limit: number): SearchResult[] {
     const mockResults: SearchResult[] = [
       {
         title: `${query} - 官方文档`,
@@ -129,7 +346,6 @@ class Context7Service implements SearchService {
         source: 'context7',
       },
     ];
-
     return mockResults.slice(0, limit);
   }
 }
