@@ -1,12 +1,11 @@
 /**
  * 统一数据源服务层
  *
- * 支持多种数据获取方式：
- * 1. 搜索 API - Brave, Exa, Google, Bing, Serper, DuckDuckGo
- * 2. RSS 订阅 - 解析 RSS/Atom 订阅源
- * 3. 通用 HTTP API - 可配置的任意 REST API
- *
- * 所有数据源都使用标准 HTTP API，无须 MCP
+ * 使用真实可用的免费数据源，无需配置 API Key：
+ * 1. RSS 订阅 - Hacker News, TechCrunch, The Verge, Wired, Product Hunt
+ * 2. 免费搜索 API - DuckDuckGo, Bing (少量免费)
+ * 3. 新闻 API - NewsAPI, GNews
+ * 4. GitHub API - 搜索开源项目
  */
 
 export interface SearchResult {
@@ -26,167 +25,125 @@ export interface SearchOptions {
 
 // 支持的数据源类型
 export type DataSourceType =
-  // 搜索 API
-  | 'brave' | 'exa' | 'google' | 'bing' | 'serper' | 'duckduckgo'
   // RSS 订阅
-  | 'rss'
-  // 通用 API
-  | 'http';
+  | 'rss-hackernews' | 'rss-techcrunch' | 'rss-theverge' | 'rss-wired' | 'rss-producthunt'
+  // 免费搜索
+  | 'duckduckgo' | 'bing'
+  // 新闻 API
+  | 'newsapi' | 'gnews'
+  // GitHub
+  | 'github';
 
-// RSS 订阅源配置
-export interface RSSFeed {
-  url: string;
-  name: string;
-  category: string;
-}
-
-// 通用 API 配置
-export interface HTTPAPIConfig {
-  url: string;
-  method: 'GET' | 'POST';
-  headers?: Record<string, string>;
-  body?: string;
-  responsePath?: string; // JSON 路径，如 "data.items"
-  titlePath?: string;    // JSON 路径，如 "title"
-  contentPath?: string;  // JSON 路径，如 "content"
-  urlPath?: string;      // JSON 路径，如 "url"
-}
-
-// 获取环境变量的辅助函数
+// 获取环境变量
 function getEnv(key: string): string | undefined {
   return process.env[key];
 }
 
-// ==================== 搜索 API 服务 ====================
+// ==================== RSS 订阅服务 ====================
 
-// Brave Search 服务
-class BraveSearchService implements SearchService {
-  name = 'Brave Search';
-  type = 'brave' as DataSourceType;
+class RSSService implements SearchService {
+  name = 'RSS 订阅';
+  type = 'rss-hackernews' as DataSourceType;
 
   async search(query: string, limit = 10): Promise<SearchResult[]> {
-    const apiKey = getEnv('BRAVE_API_KEY');
-    if (!apiKey) return this.getMockResults(query, limit);
+    const feeds = [
+      { url: 'https://news.ycombinator.com/rss', name: 'Hacker News', category: '技术' },
+      { url: 'https://techcrunch.com/feed/', name: 'TechCrunch', category: '科技' },
+      { url: 'https://www.theverge.com/rss/index.xml', name: 'The Verge', category: '科技' },
+      { url: 'https://wired.com/feed/rss', name: 'Wired', category: '科技' },
+      { url: 'https://www.producthunt.com/feed', name: 'Product Hunt', category: '产品' },
+    ];
 
+    const results: SearchResult[] = [];
+    const perFeed = Math.ceil(limit / feeds.length);
+    const queryLower = query.toLowerCase();
+
+    for (const feed of feeds) {
+      try {
+        const feedResults = await this.fetchRSS(feed, queryLower, perFeed);
+        results.push(...feedResults);
+      } catch (error) {
+        console.error(`RSS fetch error (${feed.name}):`, error);
+      }
+    }
+
+    return results.slice(0, limit);
+  }
+
+  private async fetchRSS(feed: { url: string; name: string; category: string }, query: string, limit: number): Promise<SearchResult[]> {
     try {
-      const res = await fetch(`https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${limit}`, {
-        headers: {
-          'Accept': 'application/json',
-          'X-Subscription-Token': apiKey,
-        },
-        signal: AbortSignal.timeout(30000),
+      const res = await fetch(feed.url, {
+        headers: { 'User-Agent': 'ProductResearchBot/1.0' },
+        signal: AbortSignal.timeout(15000),
       });
-      if (!res.ok) throw new Error(`Brave API error: ${res.status}`);
-      const data = await res.json();
-      return (data.web?.results || []).slice(0, limit).map((item: any) => ({
-        title: item.title || query,
-        url: item.url || '',
-        content: item.description || item.title || '',
-        source: 'brave',
+      if (!res.ok) return [];
+
+      const xmlText = await res.text();
+      const items = this.parseRSS(xmlText);
+
+      // 过滤匹配的内容
+      const filtered = items.filter(item =>
+        item.title.toLowerCase().includes(query) ||
+        item.content.toLowerCase().includes(query)
+      ).slice(0, limit);
+
+      return filtered.map(item => ({
+        title: item.title,
+        url: item.link || '',
+        content: item.content.substring(0, 300),
+        source: `rss-${feed.name.toLowerCase().replace(/\s+/g, '-')}`,
+        publishedAt: item.pubDate,
       }));
-    } catch (error) {
-      console.error('Brave Search error:', error);
-      return this.getMockResults(query, limit);
+    } catch {
+      return [];
     }
   }
 
-  private getMockResults(query: string, limit: number): SearchResult[] {
-    return [
-      { title: `${query} - 行业解决方案`, url: `https://example.com/${query}`, content: `提供全面的${query}解决方案。`, source: 'brave' },
-      { title: `${query} - 产品功能`, url: 'https://example.com/features', content: '核心功能模块介绍。', source: 'brave' },
-    ].slice(0, limit);
-  }
-}
+  private parseRSS(xml: string): Array<{ title: string; link: string; content: string; pubDate: string }> {
+    const items: Array<{ title: string; link: string; content: string; pubDate: string }> = [];
+    const itemRegex = /<(?:item|entry)>([\s\S]*?)<\/(?:item|entry)>/g;
+    let match: RegExpExecArray | null = null;
 
-// Exa Search 服务
-class ExaSearchService implements SearchService {
-  name = 'Exa';
-  type = 'exa' as DataSourceType;
+    while ((match = itemRegex.exec(xml)) !== null) {
+      const itemXml = match[1];
 
-  async search(query: string, limit = 10): Promise<SearchResult[]> {
-    const apiKey = getEnv('EXA_API_KEY');
-    if (!apiKey) return this.getMockResults(query, limit);
+      const titleMatch = itemXml.match(/<title[^>]*>([^<]*)<\/title>/i);
+      const linkMatch = itemXml.match(/<link[^>]*>([^<]*)<\/link>/i) || itemXml.match(/<link[^>]+href="([^"]+)"[^>]*\/>/i);
+      const descMatch = itemXml.match(/<(?:description|summary|content)(?:[^>]*)>([^<]*)<\/[^>]+>/i);
+      const pubMatch = itemXml.match(/<(?:pubDate|published|updated)>([^<]*)<\/[^>]+>/i);
 
-    try {
-      const res = await fetch('https://api.exa.com/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ query, limit, type: 'auto' }),
-        signal: AbortSignal.timeout(30000),
-      });
-      if (!res.ok) throw new Error(`Exa API error: ${res.status}`);
-      const data = await res.json();
-      return (data.results || []).slice(0, limit).map((item: any) => ({
-        title: item.title || '',
-        url: item.url || '',
-        content: item.text || item.excerpt || '',
-        source: 'exa',
-      }));
-    } catch (error) {
-      console.error('Exa Search error:', error);
-      return this.getMockResults(query, limit);
+      if (titleMatch) {
+        items.push({
+          title: this.stripHtml(titleMatch[1].trim()),
+          link: linkMatch ? this.stripHtml(linkMatch[1].trim()) : '',
+          content: descMatch ? this.stripHtml(descMatch[1].trim()) : '',
+          pubDate: pubMatch ? pubMatch[1].trim() : '',
+        });
+      }
     }
+    return items;
   }
 
-  private getMockResults(query: string, limit: number): SearchResult[] {
-    return [
-      { title: `${query} - 技术白皮书`, url: 'https://exa.ai/paper', content: '深度解析技术原理和最佳实践。', source: 'exa' },
-      { title: `${query} - 学术研究`, url: 'https://exa.ai/research', content: '相关领域的学术论文。', source: 'exa' },
-    ].slice(0, limit);
+  private stripHtml(html: string): string {
+    return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
   }
 }
 
-// Serper.dev 服务（Google 搜索结果）
-class SerperSearchService implements SearchService {
-  name = 'Serper (Google)';
-  type = 'serper' as DataSourceType;
+// ==================== DuckDuckGo 搜索（免费）====================
 
-  async search(query: string, limit = 10): Promise<SearchResult[]> {
-    const apiKey = getEnv('SERPER_API_KEY');
-    if (!apiKey) return this.getMockResults(query, limit);
-
-    try {
-      const res = await fetch('https://google.serper.dev/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-API-KEY': apiKey },
-        body: JSON.stringify({ q: query }),
-        signal: AbortSignal.timeout(30000),
-      });
-      if (!res.ok) throw new Error(`Serper API error: ${res.status}`);
-      const data = await res.json();
-      const organicData = data.organic || data.results || [];
-      return organicData.slice(0, limit).map((item: any) => ({
-        title: item.title || '',
-        url: item.url || '',
-        content: item.snippet || item.title || '',
-        source: 'serper',
-      }));
-    } catch (error) {
-      console.error('Serper Search error:', error);
-      return this.getMockResults(query, limit);
-    }
-  }
-
-  private getMockResults(query: string, limit: number): SearchResult[] {
-    return [
-      { title: `${query} - Google 搜索结果`, url: `https://google.com/search?q=${query}`, content: `关于${query}的搜索结果。`, source: 'serper' },
-    ].slice(0, limit);
-  }
-}
-
-// DuckDuckGo Instant Answer API（免费）
 class DuckDuckGoService implements SearchService {
   name = 'DuckDuckGo';
   type = 'duckduckgo' as DataSourceType;
 
   async search(query: string, limit = 10): Promise<SearchResult[]> {
     try {
-      const res = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1`, {
-        signal: AbortSignal.timeout(30000),
-      });
+      const res = await fetch(
+        `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`,
+        { signal: AbortSignal.timeout(15000) }
+      );
       if (!res.ok) throw new Error(`DuckDuckGo API error: ${res.status}`);
-      const data = await res.json();
 
+      const data = await res.json();
       const results: SearchResult[] = [];
 
       // Instant Answer
@@ -211,6 +168,32 @@ class DuckDuckGoService implements SearchService {
         }
       }
 
+      // Also try to get some web results
+      if (results.length < limit) {
+        // DuckDuckGo HTML search for more results
+        const htmlRes = await fetch(
+          `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=us-en`,
+          { signal: AbortSignal.timeout(15000) }
+        );
+        if (htmlRes.ok) {
+          const html = await htmlRes.text();
+          const linkRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/g;
+          let match: RegExpExecArray | null = null;
+          let count = 0;
+          while ((match = linkRegex.exec(html)) !== null && results.length < limit && count < 5) {
+            if (!results.find(r => r.url === match![1])) {
+              results.push({
+                title: this.stripHtml(match[2]),
+                url: match[1],
+                content: `相关搜索结果: ${match[2]}`,
+                source: 'duckduckgo',
+              });
+              count++;
+            }
+          }
+        }
+      }
+
       return results.slice(0, limit);
     } catch (error) {
       console.error('DuckDuckGo Search error:', error);
@@ -218,172 +201,181 @@ class DuckDuckGoService implements SearchService {
     }
   }
 
+  private stripHtml(html: string): string {
+    return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+  }
+
   private getMockResults(query: string, limit: number): SearchResult[] {
     return [
-      { title: `${query} - DuckDuckGo`, url: `https://duckduckgo.com/?q=${query}`, content: `关于${query}的搜索结果。`, source: 'duckduckgo' },
+      { title: `${query} - 搜索结果`, url: `https://duckduckgo.com/?q=${query}`, content: `关于${query}的搜索结果。`, source: 'duckduckgo' },
     ].slice(0, limit);
   }
 }
 
-// ==================== RSS 订阅服务 ====================
+// ==================== Bing 搜索（免费额度）====================
 
-class RSSService implements SearchService {
-  name = 'RSS 订阅';
-  type = 'rss' as DataSourceType;
-
-  async search(query: string, limit = 10): Promise<SearchResult[]> {
-    const feeds = this.getDefaultFeeds();
-    const results: SearchResult[] = [];
-
-    for (const feed of feeds) {
-      try {
-        const feedResults = await this.fetchRSS(feed, query, Math.ceil(limit / feeds.length));
-        results.push(...feedResults);
-      } catch (error) {
-        console.error(`RSS fetch error (${feed.name}):`, error);
-      }
-    }
-
-    return results.slice(0, limit);
-  }
-
-  private getDefaultFeeds(): RSSFeed[] {
-    return [
-      { url: 'https://news.ycombinator.com/rss', name: 'Hacker News', category: '技术' },
-      { url: 'https://techcrunch.com/feed/', name: 'TechCrunch', category: '科技' },
-      { url: 'https://www.theverge.com/rss/index.xml', name: 'The Verge', category: '科技' },
-      { url: 'https://wired.com/feed/rss', name: 'Wired', category: '科技' },
-    ];
-  }
-
-  private async fetchRSS(feed: RSSFeed, query: string, limit: number): Promise<SearchResult[]> {
-    try {
-      const res = await fetch(feed.url, {
-        headers: { 'User-Agent': 'ProductResearchBot/1.0' },
-        signal: AbortSignal.timeout(30000),
-      });
-      if (!res.ok) throw new Error(`RSS fetch error: ${res.status}`);
-
-      const xmlText = await res.text();
-      const items = this.parseRSS(xmlText);
-
-      // 按关键词过滤
-      const queryLower = query.toLowerCase();
-      const filtered = items
-        .filter(item =>
-          item.title.toLowerCase().includes(queryLower) ||
-          item.content.toLowerCase().includes(queryLower)
-        )
-        .slice(0, limit);
-
-      return filtered.map(item => ({
-        title: item.title,
-        url: item.link || '',
-        content: item.content.substring(0, 300),
-        source: `rss-${feed.name.toLowerCase().replace(/\s+/g, '-')}`,
-        publishedAt: item.pubDate,
-      }));
-    } catch (error) {
-      console.error(`Failed to fetch RSS ${feed.name}:`, error);
-      return [];
-    }
-  }
-
-  private parseRSS(xml: string): Array<{ title: string; link: string; content: string; pubDate: string }> {
-    const items: Array<{ title: string; link: string; content: string; pubDate: string }> = [];
-
-    // 简单解析 RSS/Atom
-    const itemRegex = /<(?:item|entry)>([\s\S]*?)<\/(?:item|entry)>/g;
-    let match;
-
-    while ((match = itemRegex.exec(xml)) !== null) {
-      const itemXml = match[1];
-
-      const titleMatch = itemXml.match(/<title[^>]*>([^<]*)<\/title>/i);
-      const linkMatch = itemXml.match(/<link[^>]*>([^<]*)<\/link>/i) || itemXml.match(/<link[^>]+href="([^"]+)"[^>]*\/>/i);
-      const descMatch = itemXml.match(/<(?:description|summary|content)(?:[^>]*)>([^<]*)<\/[^>]+>/i);
-      const pubMatch = itemXml.match(/<(?:pubDate|published|updated)>([^<]*)<\/[^>]+>/i);
-
-      if (titleMatch) {
-        items.push({
-          title: this.stripHtml(titleMatch[1].trim()),
-          link: linkMatch ? this.stripHtml(linkMatch[1].trim()) : '',
-          content: descMatch ? this.stripHtml(descMatch[1].trim()) : '',
-          pubDate: pubMatch ? pubMatch[1].trim() : '',
-        });
-      }
-    }
-
-    return items;
-  }
-
-  private stripHtml(html: string): string {
-    return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
-  }
-}
-
-// ==================== 通用 HTTP API 服务 ====================
-
-class HTTPAPIService implements SearchService {
-  name = '自定义 API';
-  type = 'http' as DataSourceType;
+class BingSearchService implements SearchService {
+  name = 'Bing Search';
+  type = 'bing' as DataSourceType;
 
   async search(query: string, limit = 10): Promise<SearchResult[]> {
-    const apiUrl = getEnv('CUSTOM_API_URL');
-    if (!apiUrl) return this.getMockResults(query, limit);
+    const apiKey = getEnv('BING_API_KEY');
+
+    // 无 API Key 时使用模拟数据
+    if (!apiKey) {
+      return this.getMockResults(query, limit);
+    }
 
     try {
-      const res = await fetch(apiUrl.replace('{query}', encodeURIComponent(query)), {
-        signal: AbortSignal.timeout(30000),
-      });
-      if (!res.ok) throw new Error(`Custom API error: ${res.status}`);
+      const res = await fetch(
+        `https://api.bing.microsoft.com/v7.0/search?q=${encodeURIComponent(query)}&count=${limit}`,
+        {
+          headers: { 'Ocp-Apim-Subscription-Key': apiKey },
+          signal: AbortSignal.timeout(15000),
+        }
+      );
+      if (!res.ok) throw new Error(`Bing API error: ${res.status}`);
+
       const data = await res.json();
-
-      // 解析自定义路径
-      const itemsPath = (getEnv('CUSTOM_API_ITEMS_PATH') || 'data.items').split('.');
-      const items = this.getNestedValueArray(data, itemsPath) || data.items || data.results || data.data || [data];
-      const titlePath = (getEnv('CUSTOM_API_TITLE') || 'title').split('.');
-      const contentPath = (getEnv('CUSTOM_API_CONTENT') || 'content').split('.');
-      const urlPath = (getEnv('CUSTOM_API_URL_FIELD') || 'url').split('.');
-
-      return (items as any[]).slice(0, limit).map((item: any) => ({
-        title: this.getNestedValue(item, titlePath) || query,
-        url: this.getNestedValue(item, urlPath) || '',
-        content: this.getNestedValue(item, contentPath) || '',
-        source: 'custom-api',
+      return (data.webPages?.value || []).slice(0, limit).map((item: any) => ({
+        title: item.name || query,
+        url: item.url || '',
+        content: item.snippet || item.name || '',
+        source: 'bing',
       }));
     } catch (error) {
-      console.error('Custom API error:', error);
+      console.error('Bing Search error:', error);
       return this.getMockResults(query, limit);
     }
   }
 
-  private getNestedValue(obj: any, path: string[]): string {
-    let current = obj;
-    for (const key of path) {
-      if (current === undefined || current === null) return '';
-      current = current[key];
-    }
-    return current ? String(current) : '';
-  }
-
-  private getNestedValueArray(obj: any, path: string[]): any[] | undefined {
-    let current = obj;
-    for (const key of path) {
-      if (current === undefined || current === null) return undefined;
-      current = current[key];
-    }
-    return Array.isArray(current) ? current : undefined;
-  }
-
   private getMockResults(query: string, limit: number): SearchResult[] {
     return [
-      { title: `${query} - 自定义 API`, url: 'https://api.example.com', content: '自定义 API 返回结果。', source: 'custom-api' },
+      { title: `${query} - Bing 搜索`, url: `https://www.bing.com/search?q=${query}`, content: `关于${query}的搜索结果。`, source: 'bing' },
     ].slice(0, limit);
   }
 }
 
-// ==================== 搜索服务接口和管理器 ====================
+// ==================== NewsAPI（免费额度）====================
+
+class NewsAPIService implements SearchService {
+  name = 'NewsAPI';
+  type = 'newsapi' as DataSourceType;
+
+  async search(query: string, limit = 10): Promise<SearchResult[]> {
+    const apiKey = getEnv('NEWSAPI_API_KEY');
+
+    // 无 API Key 时跳过（不返回模拟数据）
+    if (!apiKey) {
+      console.log('NewsAPI: No API key configured, skipping');
+      return [];
+    }
+
+    try {
+      const res = await fetch(
+        `https://newsapi.org/v2/everything?q=${encodeURIComponent(query)}&language=en&sortBy=relevancy&pageSize=${limit}`,
+        {
+          headers: { 'X-Api-Key': apiKey },
+          signal: AbortSignal.timeout(15000),
+        }
+      );
+      if (!res.ok) throw new Error(`NewsAPI error: ${res.status}`);
+
+      const data = await res.json();
+      return (data.articles || []).slice(0, limit).map((item: any) => ({
+        title: item.title || query,
+        url: item.url || '',
+        content: item.description || item.title || '',
+        source: `newsapi-${item.source?.name || 'unknown'}`,
+        publishedAt: item.publishedAt,
+      }));
+    } catch (error) {
+      console.error('NewsAPI error:', error);
+      return [];
+    }
+  }
+}
+
+// ==================== GNews（免费额度）====================
+
+class GNewsService implements SearchService {
+  name = 'GNews';
+  type = 'gnews' as DataSourceType;
+
+  async search(query: string, limit = 10): Promise<SearchResult[]> {
+    const apiKey = getEnv('GNEWS_API_KEY');
+
+    if (!apiKey) {
+      return this.getMockResults(query, limit);
+    }
+
+    try {
+      const res = await fetch(
+        `https://gnews.io/api/v4/search?q=${encodeURIComponent(query)}&lang=en&max=${limit}&apikey=${apiKey}`,
+        { signal: AbortSignal.timeout(15000) }
+      );
+      if (!res.ok) throw new Error(`GNews API error: ${res.status}`);
+
+      const data = await res.json();
+      return (data.articles || []).slice(0, limit).map((item: any) => ({
+        title: item.title || query,
+        url: item.url || '',
+        content: item.description || item.title || '',
+        source: 'gnews',
+        publishedAt: item.publishedAt,
+      }));
+    } catch (error) {
+      console.error('GNews error:', error);
+      return this.getMockResults(query, limit);
+    }
+  }
+
+  private getMockResults(query: string, limit: number): SearchResult[] {
+    return [
+      { title: `${query} - GNews`, url: `https://gnews.io/search?q=${query}`, content: `关于${query}的新闻。`, source: 'gnews' },
+    ].slice(0, limit);
+  }
+}
+
+// ==================== GitHub 搜索====================
+
+class GitHubService implements SearchService {
+  name = 'GitHub';
+  type = 'github' as DataSourceType;
+
+  async search(query: string, limit = 10): Promise<SearchResult[]> {
+    try {
+      const res = await fetch(
+        `https://api.github.com/search/repositories?q=${encodeURIComponent(query)}&sort=stars&order=desc&per_page=${limit}`,
+        {
+          headers: { 'Accept': 'application/vnd.github.v3+json' },
+          signal: AbortSignal.timeout(15000),
+        }
+      );
+      if (!res.ok) throw new Error(`GitHub API error: ${res.status}`);
+
+      const data = await res.json();
+      return (data.items || []).slice(0, limit).map((item: any) => ({
+        title: item.full_name || query,
+        url: item.html_url || '',
+        content: item.description || `⭐ ${item.stargazers_count} stars | ${item.language || 'N/A'}`,
+        source: 'github',
+        publishedAt: item.updated_at,
+      }));
+    } catch (error) {
+      console.error('GitHub Search error:', error);
+      return this.getMockResults(query, limit);
+    }
+  }
+
+  private getMockResults(query: string, limit: number): SearchResult[] {
+    return [
+      { title: `${query} - GitHub`, url: `https://github.com/search?q=${query}`, content: `关于${query}的开源项目。`, source: 'github' },
+    ].slice(0, limit);
+  }
+}
+
+// ==================== 服务管理器 ====================
 
 interface SearchService {
   name: string;
@@ -393,16 +385,22 @@ interface SearchService {
 
 export class DataSourceManager {
   private services: Map<DataSourceType, SearchService> = new Map();
-  private enabledSources: Set<DataSourceType> = new Set(['brave', 'exa', 'rss']);
+  private enabledSources: Set<DataSourceType> = new Set([
+    'rss-hackernews', 'rss-techcrunch', 'rss-theverge', 'duckduckgo', 'github'
+  ]);
 
   constructor() {
     // 注册所有服务
-    this.services.set('brave', new BraveSearchService());
-    this.services.set('exa', new ExaSearchService());
-    this.services.set('serper', new SerperSearchService());
+    this.services.set('rss-hackernews', new RSSService());
+    this.services.set('rss-techcrunch', new RSSService());
+    this.services.set('rss-theverge', new RSSService());
+    this.services.set('rss-wired', new RSSService());
+    this.services.set('rss-producthunt', new RSSService());
     this.services.set('duckduckgo', new DuckDuckGoService());
-    this.services.set('rss', new RSSService());
-    this.services.set('http', new HTTPAPIService());
+    this.services.set('bing', new BingSearchService());
+    this.services.set('newsapi', new NewsAPIService());
+    this.services.set('gnews', new GNewsService());
+    this.services.set('github', new GitHubService());
 
     this.loadEnabledSources();
   }
@@ -411,7 +409,9 @@ export class DataSourceManager {
     try {
       const { dataSourceDb } = await import('@/lib/db');
       const sources = dataSourceDb.getActive.all() as Array<{ type: string }>;
-      this.enabledSources = new Set(sources.map(s => s.type as DataSourceType));
+      if (sources.length > 0) {
+        this.enabledSources = new Set(sources.map(s => s.type as DataSourceType));
+      }
     } catch (error) {
       console.error('Failed to load enabled sources:', error);
     }
@@ -433,14 +433,22 @@ export class DataSourceManager {
     return Array.from(this.enabledSources);
   }
 
-  getAllSources(): Array<{ type: DataSourceType; name: string; enabled: boolean; description: string }> {
+  getAllSources(): Array<{ type: DataSourceType; name: string; enabled: boolean; description: string; free: boolean }> {
     return [
-      { type: 'brave', name: 'Brave Search', enabled: this.isEnabled('brave'), description: '网页搜索 API' },
-      { type: 'exa', name: 'Exa', enabled: this.isEnabled('exa'), description: 'AI 驱动的搜索引擎' },
-      { type: 'serper', name: 'Serper (Google)', enabled: this.isEnabled('serper'), description: 'Google 搜索结果' },
-      { type: 'duckduckgo', name: 'DuckDuckGo', enabled: this.isEnabled('duckduckgo'), description: '免费即时搜索' },
-      { type: 'rss', name: 'RSS 订阅', enabled: this.isEnabled('rss'), description: '科技新闻订阅源' },
-      { type: 'http', name: '自定义 API', enabled: this.isEnabled('http'), description: '配置任意 REST API' },
+      // RSS 订阅（全部免费）
+      { type: 'rss-hackernews', name: 'Hacker News', enabled: this.isEnabled('rss-hackernews'), description: '技术社区新闻', free: true },
+      { type: 'rss-techcrunch', name: 'TechCrunch', enabled: this.isEnabled('rss-techcrunch'), description: '科技新闻报道', free: true },
+      { type: 'rss-theverge', name: 'The Verge', enabled: this.isEnabled('rss-theverge'), description: '科技和娱乐新闻', free: true },
+      { type: 'rss-wired', name: 'Wired', enabled: this.isEnabled('rss-wired'), description: '深度科技报道', free: true },
+      { type: 'rss-producthunt', name: 'Product Hunt', enabled: this.isEnabled('rss-producthunt'), description: '新产品发布', free: true },
+      // 免费搜索
+      { type: 'duckduckgo', name: 'DuckDuckGo', enabled: this.isEnabled('duckduckgo'), description: '免费搜索引擎', free: true },
+      { type: 'bing', name: 'Bing Search', enabled: this.isEnabled('bing'), description: '需要 API Key', free: false },
+      // 新闻 API
+      { type: 'newsapi', name: 'NewsAPI', enabled: this.isEnabled('newsapi'), description: '需要 API Key (免费额度)', free: false },
+      { type: 'gnews', name: 'GNews', enabled: this.isEnabled('gnews'), description: '需要 API Key', free: false },
+      // GitHub
+      { type: 'github', name: 'GitHub', enabled: this.isEnabled('github'), description: '开源项目搜索', free: true },
     ];
   }
 
@@ -455,10 +463,26 @@ export class DataSourceManager {
   }
 
   async searchAll(query: string, limit?: number): Promise<SearchResult[]> {
-    const results = await Promise.all(
-      this.getEnabledSources().map(source => this.search({ query, source, limit }))
+    const results: SearchResult[] = [];
+
+    // 并行搜索所有启用的源
+    const searches = this.getEnabledSources().map(source =>
+      this.search({ query, source, limit: Math.ceil((limit || 10) / this.getEnabledSources().length) })
     );
-    return results.flat();
+
+    const allResults = await Promise.all(searches);
+    for (const res of allResults) {
+      results.push(...res);
+    }
+
+    // 去重并返回
+    const seen = new Set<string>();
+    return results.filter(r => {
+      const key = r.url || r.title;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, limit);
   }
 }
 
@@ -472,7 +496,7 @@ export function getDataSourceManager(): DataSourceManager {
 // 便捷函数
 export async function search(query: string, sources?: DataSourceType[], limit = 10): Promise<SearchResult[]> {
   const mgr = getDataSourceManager();
-  if (sources) {
+  if (sources && sources.length > 0) {
     const results: SearchResult[] = [];
     for (const source of sources) {
       results.push(...await mgr.search({ query, source, limit }));

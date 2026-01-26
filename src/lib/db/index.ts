@@ -80,15 +80,20 @@ function initDatabase() {
 
   // 插入默认数据源
   const defaultSources = [
-    // 搜索 API
-    { id: 'brave', name: 'Brave Search', type: 'brave', config: '{}' },
-    { id: 'exa', name: 'Exa', type: 'exa', config: '{}' },
-    { id: 'serper', name: 'Serper (Google)', type: 'serper', config: '{}' },
+    // RSS 订阅（免费，无需配置）
+    { id: 'rss-hackernews', name: 'Hacker News', type: 'rss-hackernews', config: '{}' },
+    { id: 'rss-techcrunch', name: 'TechCrunch', type: 'rss-techcrunch', config: '{}' },
+    { id: 'rss-theverge', name: 'The Verge', type: 'rss-theverge', config: '{}' },
+    { id: 'rss-wired', name: 'Wired', type: 'rss-wired', config: '{}' },
+    { id: 'rss-producthunt', name: 'Product Hunt', type: 'rss-producthunt', config: '{}' },
+    // 免费搜索
     { id: 'duckduckgo', name: 'DuckDuckGo', type: 'duckduckgo', config: '{}' },
-    // RSS 订阅（免费）
-    { id: 'rss', name: 'RSS 订阅', type: 'rss', config: '{}' },
-    // 自定义 API
-    { id: 'http', name: '自定义 API', type: 'http', config: '{}' },
+    { id: 'bing', name: 'Bing Search', type: 'bing', config: '{}' },
+    // 需要 API Key（可选）
+    { id: 'newsapi', name: 'NewsAPI', type: 'newsapi', config: '{}' },
+    { id: 'gnews', name: 'GNews', type: 'gnews', config: '{}' },
+    // GitHub（免费）
+    { id: 'github', name: 'GitHub', type: 'github', config: '{}' },
   ];
 
   const insertSource = db.prepare(`
