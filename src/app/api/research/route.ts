@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { projectDb, searchResultDb, reportDb, dataSourceDb } from '@/lib/db';
-import { getMCPClient } from '@/lib/mcp';
+import { projectDb, searchResultDb, reportDb } from '@/lib/db';
+import { getSearchServiceManager } from '@/lib/search';
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -103,21 +103,6 @@ ${project.description || '本报告通过调研全网产品信息，为您提供
 }
 
 // POST /api/research
-/**
- * 调研 API
- *
- * ⚠️ 当前 MCP 客户端使用模拟数据
- *
- * 执行流程：
- * 1. 获取项目信息
- * 2. 更新状态为 processing
- * 3. 调用 MCP 客户端搜索（当前返回模拟数据）
- * 4. 保存搜索结果
- * 5. 生成报告
- * 6. 更新状态为 completed
- *
- * TODO: 实现真正的 MCP 服务器调用
- */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -148,15 +133,15 @@ export async function POST(request: NextRequest) {
       status: 'processing',
     });
 
-    // 获取MCP客户端和启用的数据源
-    const mcpClient = getMCPClient();
-    const enabledSources = mcpClient.getEnabledSources();
+    // 获取搜索服务管理器
+    const searchManager = getSearchServiceManager();
+    const enabledSources = searchManager.getEnabledSources();
 
     // 收集搜索结果
     const allResults: any[] = [];
     for (const source of enabledSources) {
       try {
-        const results = await mcpClient.search({
+        const results = await searchManager.search({
           query: project.title,
           source: source as any,
           limit: 5,
