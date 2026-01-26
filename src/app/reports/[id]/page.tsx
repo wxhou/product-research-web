@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import Markdown from 'react-markdown';
+import mermaid from 'mermaid';
 
 interface Report {
   id: string;
@@ -25,12 +27,30 @@ export default function ReportPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [project, setProject] = useState<Project | null>(null);
   const [loading, setLoading] = useState(true);
+  const mermaidRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (reportId) {
       fetchReport();
     }
   }, [reportId]);
+
+  useEffect(() => {
+    // Initialize mermaid
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'default',
+      securityLevel: 'loose',
+      fontFamily: 'inherit',
+    });
+  }, []);
+
+  useEffect(() => {
+    // Render mermaid charts when content changes
+    if (report?.mermaid_charts && mermaidRef.current) {
+      renderMermaidCharts();
+    }
+  }, [report, mermaidRef.current]);
 
   const fetchReport = async () => {
     try {
@@ -44,6 +64,29 @@ export default function ReportPage() {
       console.error('Failed to fetch report:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const renderMermaidCharts = async () => {
+    if (!mermaidRef.current || !report?.mermaid_charts) return;
+
+    try {
+      const charts = JSON.parse(report.mermaid_charts || '[]');
+      mermaidRef.current.innerHTML = '';
+
+      for (const chart of charts) {
+        const chartDiv = document.createElement('div');
+        chartDiv.className = 'mermaid-chart';
+        chartDiv.innerHTML = `\`\`\`mermaid\n${chart.content}\n\`\`\``;
+        mermaidRef.current.appendChild(chartDiv);
+      }
+
+      // Render all mermaid charts
+      await mermaid.run({
+        nodes: mermaidRef.current.querySelectorAll('.mermaid-chart'),
+      });
+    } catch (error) {
+      console.error('Failed to render mermaid charts:', error);
     }
   };
 
@@ -61,6 +104,38 @@ export default function ReportPage() {
       month: 'long',
       day: 'numeric',
     });
+  };
+
+  // Custom renderer for markdown components
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const components: any = {
+    h1: ({ children }: { children: React.ReactNode }) => <h1 className="report-h1">{children}</h1>,
+    h2: ({ children }: { children: React.ReactNode }) => <h2 className="report-h2">{children}</h2>,
+    h3: ({ children }: { children: React.ReactNode }) => <h3 className="report-h3">{children}</h3>,
+    h4: ({ children }: { children: React.ReactNode }) => <h4 className="report-h4">{children}</h4>,
+    p: ({ children }: { children: React.ReactNode }) => <p className="report-p">{children}</p>,
+    ul: ({ children }: { children: React.ReactNode }) => <ul className="report-ul">{children}</ul>,
+    ol: ({ children }: { children: React.ReactNode }) => <ol className="report-ol">{children}</ol>,
+    li: ({ children }: { children: React.ReactNode }) => <li className="report-li">{children}</li>,
+    blockquote: ({ children }: { children: React.ReactNode }) => (
+      <blockquote className="report-blockquote">{children}</blockquote>
+    ),
+    code: ({ className, children }: { className?: string; children: React.ReactNode }) => {
+      const isInline = !className;
+      return isInline ? (
+        <code className="code-inline">{children}</code>
+      ) : (
+        <code className={`code-block ${className}`}>{children}</code>
+      );
+    },
+    pre: ({ children }: { children: React.ReactNode }) => <pre className="code-pre">{children}</pre>,
+    hr: () => <hr className="report-hr" />,
+    table: ({ children }: { children: React.ReactNode }) => (
+      <div className="table-wrapper">{children}</div>
+    ),
+    tr: ({ children }: { children: React.ReactNode }) => <tr className="table-row">{children}</tr>,
+    th: ({ children }: { children: React.ReactNode }) => <th className="table-cell table-header">{children}</th>,
+    td: ({ children }: { children: React.ReactNode }) => <td className="table-cell">{children}</td>,
   };
 
   if (loading) {
@@ -123,12 +198,6 @@ export default function ReportPage() {
         </div>
 
         <div className="header-actions">
-          <button className="btn btn-secondary">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-            </svg>
-            导出 PDF
-          </button>
           <button className="btn btn-secondary" onClick={handleCopyMarkdown}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <rect x="9" y="9" width="13" height="13" rx="2" />
@@ -139,94 +208,14 @@ export default function ReportPage() {
         </div>
       </header>
 
-      <div className="report-layout">
-        <article className="report-content">
-          <div className="report-body">
-            {/* 渲染 Markdown 内容 */}
-            {report.content.split('\n').map((line, index) => {
-              // 处理标题
-              if (line.startsWith('# ')) {
-                return <h1 key={index}>{line.substring(2)}</h1>;
-              }
-              if (line.startsWith('## ')) {
-                return <h2 key={index}>{line.substring(3)}</h2>;
-              }
-              if (line.startsWith('### ')) {
-                return <h3 key={index}>{line.substring(4)}</h3>;
-              }
-              if (line.startsWith('#### ')) {
-                return <h4 key={index}>{line.substring(5)}</h4>;
-              }
-              // 处理引用
-              if (line.startsWith('> ')) {
-                return <blockquote key={index}>{line.substring(2)}</blockquote>;
-              }
-              // 处理列表
-              if (line.startsWith('- ')) {
-                return <li key={index}>{line.substring(2)}</li>;
-              }
-              // 处理有序列表
-              if (/^\d+\. /.test(line)) {
-                return <li key={index}>{line.replace(/^\d+\. /, '')}</li>;
-              }
-              // 处理粗体
-              if (line.includes('**')) {
-                const parts = line.split('**');
-                return (
-                  <p key={index}>
-                    {parts.map((part, i) =>
-                      i % 2 === 1 ? <strong key={i}>{part}</strong> : part
-                    )}
-                  </p>
-                );
-              }
-              // 处理代码块
-              if (line.startsWith('```')) {
-                return null; // 跳过代码块标记，实际渲染时需要特殊处理
-              }
-              // 处理行内代码
-              if (line.includes('`')) {
-                const parts = line.split('`');
-                return (
-                  <p key={index}>
-                    {parts.map((part, i) =>
-                      i % 2 === 1 ? <code key={i}>{part}</code> : part
-                    )}
-                  </p>
-                );
-              }
-              // 处理分隔线
-              if (line.startsWith('---')) {
-                return <hr key={index} />;
-              }
-              // 处理表格行
-              if (line.startsWith('|')) {
-                if (line.includes('---')) {
-                  return null; // 跳过表格分隔行
-                }
-                const cells = line.split('|').filter((c: string) => c.trim());
-                if (cells[0]?.includes('调研产品数')) {
-                  // 这是概览表格
-                  return null;
-                }
-                return (
-                  <div key={index} className="table-row">
-                    {cells.map((cell: string, i: number) => (
-                      <span key={i} className="table-cell">{cell.trim()}</span>
-                    ))}
-                  </div>
-                );
-              }
-              // 空行
-              if (line.trim() === '') {
-                return <br key={index} />;
-              }
-              // 普通段落
-              return <p key={index}>{line}</p>;
-            })}
-          </div>
-        </article>
-      </div>
+      <article className="report-content">
+        <div className="report-body">
+          <Markdown components={components}>{report.content}</Markdown>
+        </div>
+
+        {/* Mermaid Charts */}
+        <div ref={mermaidRef} className="mermaid-container" />
+      </article>
 
       <style jsx>{`
         .report-page {
@@ -274,10 +263,6 @@ export default function ReportPage() {
           gap: 0.75rem;
         }
 
-        .report-layout {
-          display: block;
-        }
-
         .report-content {
           min-width: 0;
         }
@@ -289,41 +274,41 @@ export default function ReportPage() {
           padding: 2.5rem;
         }
 
-        .report-body :global(h1) {
+        .report-body :global(.report-h1) {
           font-size: 1.75rem;
           margin: 2rem 0 1rem;
           padding-bottom: 0.5rem;
           border-bottom: 1px solid var(--border-light);
         }
 
-        .report-body :global(h1:first-child) {
+        .report-body :global(.report-h1:first-child) {
           margin-top: 0;
           border-bottom: none;
         }
 
-        .report-body :global(h2) {
+        .report-body :global(.report-h2) {
           font-size: 1.375rem;
           margin: 2rem 0 1rem;
         }
 
-        .report-body :global(h3) {
+        .report-body :global(.report-h3) {
           font-size: 1.125rem;
           margin: 1.5rem 0 0.75rem;
           color: var(--foreground-secondary);
         }
 
-        .report-body :global(h4) {
+        .report-body :global(.report-h4) {
           font-size: 1rem;
           margin: 1.25rem 0 0.5rem;
         }
 
-        .report-body :global(p) {
+        .report-body :global(.report-p) {
           color: var(--foreground-secondary);
           line-height: 1.8;
           margin: 0.75rem 0;
         }
 
-        .report-body :global(blockquote) {
+        .report-body :global(.report-blockquote) {
           margin: 1rem 0;
           padding: 1rem 1.5rem;
           background: var(--background-subtle);
@@ -332,13 +317,19 @@ export default function ReportPage() {
           color: var(--foreground-secondary);
         }
 
-        .report-body :global(li) {
-          color: var(--foreground-secondary);
-          line-height: 1.8;
-          margin: 0.5rem 0 0.5rem 1.5rem;
+        .report-body :global(.report-ul),
+        .report-body :global(.report-ol) {
+          margin: 0.75rem 0;
+          padding-left: 1.5rem;
         }
 
-        .report-body :global(code) {
+        .report-body :global(.report-li) {
+          color: var(--foreground-secondary);
+          line-height: 1.8;
+          margin: 0.5rem 0;
+        }
+
+        .report-body :global(.code-inline) {
           background: var(--background-subtle);
           padding: 0.125rem 0.375rem;
           border-radius: 4px;
@@ -346,10 +337,30 @@ export default function ReportPage() {
           font-size: 0.875em;
         }
 
-        .report-body :global(hr) {
+        .report-body :global(.code-pre) {
+          background: var(--background-subtle);
+          border-radius: var(--radius-md);
+          padding: 1rem;
+          overflow-x: auto;
+          margin: 1rem 0;
+        }
+
+        .report-body :global(.code-block) {
+          display: block;
+          font-family: 'SF Mono', Monaco, monospace;
+          font-size: 0.875rem;
+          color: var(--foreground);
+        }
+
+        .report-body :global(.report-hr) {
           margin: 2rem 0;
           border: none;
           border-top: 1px solid var(--border-light);
+        }
+
+        .report-body :global(.table-wrapper) {
+          overflow-x: auto;
+          margin: 1rem 0;
         }
 
         .report-body :global(.table-row) {
@@ -363,6 +374,20 @@ export default function ReportPage() {
         .report-body :global(.table-cell) {
           font-size: 0.875rem;
           color: var(--foreground-secondary);
+        }
+
+        .report-body :global(.table-header) {
+          font-weight: 600;
+          color: var(--foreground);
+        }
+
+        .mermaid-container {
+          margin-top: 2rem;
+        }
+
+        .mermaid-container :global(.mermaid-chart) {
+          margin: 1rem 0;
+          text-align: center;
         }
 
         .loading, .empty-state {

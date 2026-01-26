@@ -103,6 +103,21 @@ ${project.description || '本报告通过调研全网产品信息，为您提供
 }
 
 // POST /api/research
+/**
+ * 调研 API
+ *
+ * ⚠️ 当前 MCP 客户端使用模拟数据
+ *
+ * 执行流程：
+ * 1. 获取项目信息
+ * 2. 更新状态为 processing
+ * 3. 调用 MCP 客户端搜索（当前返回模拟数据）
+ * 4. 保存搜索结果
+ * 5. 生成报告
+ * 6. 更新状态为 completed
+ *
+ * TODO: 实现真正的 MCP 服务器调用
+ */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();

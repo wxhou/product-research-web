@@ -1,10 +1,17 @@
 /**
  * MCP Client Module
  *
- * This module provides a unified interface to call MCP (Model Context Protocol) servers.
- * In a production environment, this would connect to actual MCP servers.
+ * ⚠️ 当前为模拟实现，返回预定义的测试数据
  *
- * For now, it provides a mock implementation that simulates MCP responses.
+ * 计划实现真正的 MCP 服务器连接：
+ * 1. 使用 @modelcontextprotocol/sdk 连接 MCP Server
+ * 2. 或通过 HTTP API 调用外部搜索服务
+ *
+ * 支持的数据源：
+ * - brave: Brave Search API
+ * - exa: Exa API
+ * - firecrawl: Firecrawl API
+ * - context7: Context7 API
  */
 
 export interface SearchResult {
