@@ -74,8 +74,11 @@ function initDatabase() {
 
     -- 创建索引
     CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+    CREATE INDEX IF NOT EXISTS idx_projects_updated_at ON projects(updated_at);
     CREATE INDEX IF NOT EXISTS idx_search_results_project ON search_results(project_id);
+    CREATE INDEX IF NOT EXISTS idx_search_results_source ON search_results(source);
     CREATE INDEX IF NOT EXISTS idx_reports_project ON reports(project_id);
+    CREATE INDEX IF NOT EXISTS idx_data_sources_active ON data_sources(is_active);
   `);
 
   // 插入默认数据源
@@ -159,6 +162,10 @@ export const reportDb = {
   create: db.prepare(`
     INSERT INTO reports (id, project_id, title, content, mermaid_charts)
     VALUES (@id, @project_id, @title, @content, @mermaid_charts)
+  `),
+
+  getAll: db.prepare(`
+    SELECT * FROM reports ORDER BY created_at DESC
   `),
 
   getByProject: db.prepare(`

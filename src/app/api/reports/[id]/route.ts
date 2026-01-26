@@ -33,42 +33,30 @@ interface SearchResult {
   created_at: string;
 }
 
-// GET /api/reports/[id]
+// Redirect compatibility: forward path-based requests to the new query-based route
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const { id: reportId } = await params;
+  const { id } = await params;
+  const url = new URL(request.url);
+  url.pathname = '/api/reports';
+  url.searchParams.set('id', id);
+  return NextResponse.redirect(url.toString(), 307);
+}
 
-    // 获取报告
-    const report = reportDb.getById.get({ id: reportId }) as Report | undefined;
-    if (!report) {
-      return NextResponse.json(
-        { success: false, error: 'Report not found' },
-        { status: 404 }
-      );
-    }
+export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const url = new URL(request.url);
+  url.pathname = '/api/reports';
+  url.searchParams.set('id', id);
+  return NextResponse.redirect(url.toString(), 307);
+}
 
-    // 获取关联的项目
-    const project = projectDb.getById.get({ id: report.project_id }) as Project | undefined;
-
-    // 获取搜索结果数量
-    const searchResults = searchResultDb.getByProject.all({ project_id: report.project_id }) as SearchResult[];
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        report,
-        project,
-        searchResultCount: searchResults.length,
-      },
-    });
-  } catch (error) {
-    console.error('Error fetching report:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch report' },
-      { status: 500 }
-    );
-  }
+export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const url = new URL(request.url);
+  url.pathname = '/api/reports';
+  url.searchParams.set('id', id);
+  return NextResponse.redirect(url.toString(), 307);
 }

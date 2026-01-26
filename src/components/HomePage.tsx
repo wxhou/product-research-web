@@ -53,9 +53,19 @@ export default function HomePage() {
           keywords: [],
         }),
       });
+
+      if (!createRes.ok) {
+        const errorData = await createRes.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP error! status: ${createRes.status}`);
+      }
+
       const createData = await createRes.json();
 
-      if (createData.success) {
+      if (!createData.success) {
+        throw new Error(createData.error || 'Failed to create project');
+      }
+
+      if (createData.data?.id) {
         // 2. 启动调研
         const researchRes = await fetch('/api/research', {
           method: 'POST',
@@ -65,15 +75,24 @@ export default function HomePage() {
             keywords: [],
           }),
         });
+
+        if (!researchRes.ok) {
+          const errorData = await researchRes.json().catch(() => ({}));
+          throw new Error(errorData.error || `HTTP error! status: ${researchRes.status}`);
+        }
+
         const researchData = await researchRes.json();
 
-        if (researchData.success) {
-          // 3. 跳转到项目详情页
-          router.push(`/projects/${createData.data.id}`);
+        if (!researchData.success) {
+          throw new Error(researchData.error || 'Research failed');
         }
+
+        // 3. 跳转到项目详情页
+        router.push(`/projects?id=${createData.data.id}`);
       }
     } catch (error) {
       console.error('Research failed:', error);
+      alert(error instanceof Error ? error.message : '调研失败，请稍后重试');
     } finally {
       setIsResearching(false);
     }
@@ -102,11 +121,15 @@ export default function HomePage() {
     <main className="home">
       {/* Hero Section */}
       <section className="hero">
-        <div className="hero-content animate-fade-in">
+        <div className="hero-content animate-fade-in-up">
+          <div className="hero-badge">
+            <span className="badge-dot"></span>
+            AI 驱动的产品调研助手
+          </div>
           <h1>产品调研助手</h1>
           <p>从全网收集产品方案、技术路线、行业趋势，输出详细的功能推荐和机会分析</p>
 
-          <div className="research-form">
+          <div className="research-form card">
             <div className="form-group">
               <label>调研主题</label>
               <input
@@ -119,15 +142,6 @@ export default function HomePage() {
               />
             </div>
 
-            <div className="form-group">
-              <label>关键词（选填）</label>
-              <input
-                type="text"
-                className="input"
-                placeholder="智慧运维, 故障预测, PHM"
-              />
-            </div>
-
             <button
               className="btn btn-primary research-btn"
               onClick={handleResearch}
@@ -135,12 +149,12 @@ export default function HomePage() {
             >
               {isResearching ? (
                 <>
-                  <span className="spinner" />
+                  <span className="spinner"></span>
                   调研中...
                 </>
               ) : (
                 <>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="11" cy="11" r="8" />
                     <path d="M21 21l-4.35-4.35" />
                   </svg>
@@ -149,203 +163,93 @@ export default function HomePage() {
               )}
             </button>
           </div>
+
+          <div className="hero-features">
+            <div className="feature-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <span>多数据源聚合</span>
+            </div>
+            <div className="feature-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <span>AI 智能分析</span>
+            </div>
+            <div className="feature-item">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <span>可视化报告</span>
+            </div>
+          </div>
         </div>
       </section>
 
       {/* Recent Projects */}
       <section className="recent-section">
         <div className="section-header">
-          <h2>最近调研</h2>
-          <Link href="/projects" className="view-all">
+          <div>
+            <h2>最近调研</h2>
+            <p className="section-desc">查看和管理您的调研项目</p>
+          </div>
+          <Link href="/projects" className="view-all-link">
             查看全部
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M5 12h14M12 5l7 7-7 7" />
             </svg>
           </Link>
         </div>
 
         {loading ? (
-          <div className="loading">加载中...</div>
+          <div className="loading-grid">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="skeleton-card card">
+                <div className="skeleton" style={{ height: '24px', width: '60%', marginBottom: '12px' }}></div>
+                <div className="skeleton" style={{ height: '16px', width: '40%' }}></div>
+              </div>
+            ))}
+          </div>
         ) : recentProjects.length === 0 ? (
-          <div className="empty-state">暂无调研项目</div>
+          <div className="empty-state card">
+            <div className="empty-icon">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+            <h3>暂无调研项目</h3>
+            <p>输入调研主题，开始您的第一个产品调研</p>
+          </div>
         ) : (
-          <div className="project-grid animate-stagger">
-            {recentProjects.map((project) => (
-              <Link key={project.id} href={`/projects/${project.id}`} className="project-card card">
+          <div className="project-grid">
+            {recentProjects.map((project, index) => (
+              <Link
+                key={project.id}
+                href={`/projects?id=${project.id}`}
+                className="project-card card animate-fade-in-up"
+                style={{ animationDelay: `${index * 100}ms` }}
+              >
                 <div className="project-header">
-                  <h3>{project.title}</h3>
-                  {getStatusBadge(project.status)}
+                  <div className="project-status">
+                    {getStatusBadge(project.status)}
+                  </div>
+                  <span className="project-date">{formatDate(project.created_at)}</span>
                 </div>
-                <div className="project-meta">
-                  <span>{formatDate(project.created_at)}</span>
-                  <span>·</span>
-                  <span>{project.status === 'completed' ? '已完成' : project.status === 'processing' ? '进行中' : '草稿'}</span>
+                <h3 className="project-title">{project.title}</h3>
+                <div className="project-footer">
+                  <span className="project-action">
+                    查看详情
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M5 12h14M12 5l7 7-7 7" />
+                    </svg>
+                  </span>
                 </div>
               </Link>
             ))}
           </div>
         )}
       </section>
-
-      <style jsx>{`
-        .home {
-          min-height: 100vh;
-        }
-
-        .hero {
-          padding: 4rem 0;
-          text-align: center;
-        }
-
-        .hero-content {
-          max-width: 640px;
-          margin: 0 auto;
-        }
-
-        .hero h1 {
-          font-size: 3rem;
-          font-weight: 700;
-          margin-bottom: 1rem;
-          letter-spacing: -0.03em;
-        }
-
-        .hero p {
-          font-size: 1.125rem;
-          color: var(--foreground-secondary);
-          margin-bottom: 3rem;
-        }
-
-        .research-form {
-          background: var(--background-card);
-          border: 1px solid var(--border);
-          border-radius: var(--radius-xl);
-          padding: 2rem;
-          text-align: left;
-        }
-
-        .form-group {
-          margin-bottom: 1.25rem;
-        }
-
-        .form-group label {
-          display: block;
-          font-size: 0.875rem;
-          font-weight: 500;
-          margin-bottom: 0.5rem;
-          color: var(--foreground);
-        }
-
-        .research-btn {
-          width: 100%;
-          height: 48px;
-          font-size: 1rem;
-        }
-
-        .spinner {
-          width: 18px;
-          height: 18px;
-          border: 2px solid rgba(255, 255, 255, 0.3);
-          border-top-color: white;
-          border-radius: 50%;
-          animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-
-        .recent-section {
-          padding: 3rem 0;
-        }
-
-        .section-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 1.5rem;
-        }
-
-        .section-header h2 {
-          font-size: 1.5rem;
-        }
-
-        .view-all {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          font-size: 0.9375rem;
-          font-weight: 500;
-          color: var(--color-primary);
-        }
-
-        .view-all:hover {
-          text-decoration: underline;
-        }
-
-        .project-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-          gap: 1rem;
-        }
-
-        .project-card {
-          display: block;
-          text-decoration: none;
-          padding: 1.5rem;
-        }
-
-        .project-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: 1rem;
-          margin-bottom: 0.75rem;
-        }
-
-        .project-header h3 {
-          font-size: 1.0625rem;
-          font-weight: 600;
-          color: var(--foreground);
-          line-height: 1.4;
-        }
-
-        .status-badge {
-          font-size: 0.75rem;
-          font-weight: 500;
-          padding: 0.25rem 0.625rem;
-          border-radius: 9999px;
-          flex-shrink: 0;
-        }
-
-        .status-completed {
-          background: #ecfdf5;
-          color: #059669;
-        }
-
-        .status-processing {
-          background: #fef3c7;
-          color: #d97706;
-        }
-
-        .status-draft {
-          background: var(--background-subtle);
-          color: var(--foreground-secondary);
-        }
-
-        .project-meta {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          font-size: 0.875rem;
-          color: var(--foreground-muted);
-        }
-
-        .loading, .empty-state {
-          text-align: center;
-          padding: 3rem;
-          color: var(--foreground-muted);
-        }
-      `}</style>
     </main>
   );
 }

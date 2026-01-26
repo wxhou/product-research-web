@@ -104,7 +104,7 @@ export function analyzeSearchResults(results: SearchResult[], query: string): An
   const swot = generateSWOT(features, results);
   const competitors = extractCompetitors(results);
   const marketData = extractMarketData(results);
-  const mermaidCharts = generateMermaidCharts(features, competitors, swot, marketData);
+  const mermaidCharts = generateMermaidCharts(features, competitors, swot, marketData, results);
 
   return {
     features,
@@ -244,10 +244,23 @@ function extractCompetitors(results: SearchResult[]): CompetitorInfo[] {
     });
   }
 
-  // 为每个竞品添加功能
-  for (const [, competitor] of competitors) {
+  // 基于功能出现频率为竞品分配功能
+  const featureScores: Record<string, number> = {};
+  for (const result of results) {
+    const content = result.title + ' ' + result.content;
     for (const feature of featuresList) {
-      if (Math.random() > 0.5) {
+      if (content.includes(feature)) {
+        featureScores[feature] = (featureScores[feature] || 0) + 1;
+      }
+    }
+  }
+
+  for (const [, competitor] of competitors) {
+    // 根据功能在所有搜索结果中的出现频率来决定竞品是否具有该功能
+    for (const feature of featuresList) {
+      const score = featureScores[feature] || 0;
+      // 如果功能在超过 30% 的搜索结果中出现，认为是核心功能
+      if (score > results.length * 0.3) {
         competitor.features.push(feature);
       }
     }
@@ -298,27 +311,44 @@ function generateMermaidCharts(
   features: FeatureAnalysis[],
   competitors: CompetitorInfo[],
   swot: SWOTAnalysis,
-  marketData: MarketData
+  marketData: MarketData,
+  searchResults: SearchResult[] = []
 ): MermaidChart[] {
   const charts: MermaidChart[] = [];
+  const totalResults = searchResults.length || 1;
 
-  // 1. 功能频率柱状图
+  // 1. 功能频率图 (使用简单的 gantt 或其他稳定图表)
   const topFeatures = features.slice(0, 8);
   if (topFeatures.length > 0) {
     charts.push({
       id: 'feature-frequency',
-      type: 'bar',
+      type: 'gantt',
       title: '功能频率分布',
-      content: 'xychart-beta\n  title "功能出现频率统计"\n  x-axis [' + topFeatures.map(f => '"' + f.name + '"').join(', ') + ']\n  y-axis "出现次数" 0 --> ' + (Math.max(...topFeatures.map(f => f.count)) + 1) + '\n  bar [' + topFeatures.map(f => f.count).join(', ') + ']',
+      content: 'gantt\n  title 功能出现频率统计\n  dateFormat X\n  axisFormat %s\n' + topFeatures.map(f => '  section ' + f.name + '\n  ' + f.name + ' : 0, ' + (f.count * 3)).join('\n'),
     });
   }
 
-  // 2. 功能对比矩阵
+  // 2. 功能对比矩阵 - 基于实际搜索结果中功能出现的频率
   const featureNames = ['实时监测', '故障预测', '预警告警', '工单管理', '数据可视化', 'AI分析'];
   const competitorNames = competitors.map(c => c.name).slice(0, 3);
   if (competitorNames.length > 0) {
+    // 计算每个功能在搜索结果中的出现频率
+    const featurePresence: Record<string, number> = {};
+    for (const result of searchResults) {
+      const content = (result.title + ' ' + result.content).toLowerCase();
+      for (const feature of featureNames) {
+        if (content.includes(feature.toLowerCase())) {
+          featurePresence[feature] = (featurePresence[feature] || 0) + 1;
+        }
+      }
+    }
+
     const matrixRows = competitorNames.map(name => {
-      const row = featureNames.map(() => Math.random() > 0.3 ? '✓' : '✗').join(' | ');
+      const row = featureNames.map(feature => {
+        // 根据功能在搜索结果中的出现频率决定，高频功能标记为 ✓
+        const presence = featurePresence[feature] || 0;
+        return presence > totalResults * 0.4 ? '✓' : '✗';
+      }).join(' | ');
       return '| ' + name + ' | ' + row + ' |';
     }).join('\n');
 
@@ -330,12 +360,26 @@ function generateMermaidCharts(
     });
   }
 
-  // 3. 机会四象限图
+  // 3. 机会四象限图 (使用 flowchart 兼容版本)
   charts.push({
     id: 'opportunity-quadrant',
-    type: 'quadrant',
+    type: 'flowchart',
     title: '机会四象限',
-    content: 'quadrantChart\n  title "机会识别四象限"\n  x-axis "低复杂度" --> "高复杂度"\n  y-axis "低需求" --> "高需求"\n  quadrant-1 "重点投入"\n  quadrant-2 "先观望"\n  quadrant-3 "低成本试错"\n  quadrant-4 "维持现状"\n  "多模态感知融合": [0.7, 0.8]\n  "边缘智能": [0.6, 0.75]\n  "行业专用模型": [0.8, 0.6]\n  "实时数据流处理": [0.5, 0.85]\n  "低代码配置": [0.3, 0.7]\n  "多租户支持": [0.4, 0.5]',
+    content: 'flowchart TB\n' +
+      '    subgraph "重点投入"\n' +
+      '    A["多模态感知融合"]\n' +
+      '    B["边缘智能"]\n' +
+      '    end\n' +
+      '    subgraph "先观望"\n' +
+      '    C["行业专用模型"]\n' +
+      '    end\n' +
+      '    subgraph "低成本试错"\n' +
+      '    D["低代码配置"]\n' +
+      '    E["多租户支持"]\n' +
+      '    end\n' +
+      '    subgraph "维持现状"\n' +
+      '    F["实时数据流处理"]\n' +
+      '    end',
   });
 
   // 4. 技术路线时间线
@@ -388,7 +432,13 @@ export function generateFullReport(
   const timelineChart = mermaidCharts.find(c => c.id === 'tech-timeline');
 
   const featureMatrix = features.slice(0, 6).map(f => {
-    const row = competitors.slice(0, 3).map(() => Math.random() > 0.3 ? '✓' : '✗').join(' | ');
+    // 基于功能在搜索结果中的出现频率
+    const featurePresence = features.find(af => af.name === f.name)?.count || 0;
+    const presence = featurePresence / searchResults.length;
+    // 高频功能标记为 ✓，低频标记为 ✗
+    const row = competitors.slice(0, 3).map(() =>
+      presence > 0.3 ? '✓' : '✗'
+    ).join(' | ');
     return '| ' + f.name + ' | ' + row + ' |';
   }).join('\n');
 

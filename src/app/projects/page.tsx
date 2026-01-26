@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import ProjectViewer from '../../components/ProjectViewer';
 
 interface Project {
   id: string;
@@ -12,6 +14,9 @@ interface Project {
 }
 
 export default function ProjectsPage() {
+  const searchParams = useSearchParams();
+  const projectIdFromQuery = searchParams?.get('id') || null;
+
   const [filter, setFilter] = useState<'all' | 'completed' | 'processing' | 'draft'>('all');
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,6 +28,9 @@ export default function ProjectsPage() {
   const fetchProjects = async () => {
     try {
       const res = await fetch('/api/projects');
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
       const data = await res.json();
       if (data.success) {
         setProjects(data.data);
@@ -47,23 +55,40 @@ export default function ProjectsPage() {
     });
   };
 
-  const getStatusBadge = (status: Project['status']) => {
+  const getStatusConfig = (status: Project['status']) => {
     const config = {
-      completed: { label: '已完成', className: 'status-completed' },
-      processing: { label: '进行中', className: 'status-processing' },
-      draft: { label: '草稿', className: 'status-draft' },
+      completed: { label: '已完成', className: 'status-completed', icon: 'check' },
+      processing: { label: '进行中', className: 'status-processing', icon: 'loader' },
+      draft: { label: '草稿', className: 'status-draft', icon: 'edit' },
     };
-    const { label, className } = config[status];
-    return <span className={`status-badge ${className}`}>{label}</span>;
+    return config[status];
   };
+
+  const filters = [
+    { key: 'all', label: '全部' },
+    { key: 'completed', label: '已完成' },
+    { key: 'processing', label: '进行中' },
+    { key: 'draft', label: '草稿' },
+  ] as const;
+
+  if (projectIdFromQuery) {
+    return (
+      <div className="projects-page">
+        <ProjectViewer projectId={projectIdFromQuery} />
+      </div>
+    );
+  }
 
   return (
     <div className="projects-page">
       <header className="page-header">
         <div className="header-content">
-          <h1>项目</h1>
+          <div className="header-text">
+            <h1>项目</h1>
+            <p className="header-desc">管理和查看您的产品调研项目</p>
+          </div>
           <Link href="/" className="btn btn-primary">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 5v14M5 12h14" />
             </svg>
             新建调研
@@ -72,174 +97,100 @@ export default function ProjectsPage() {
       </header>
 
       <div className="filter-bar">
-        {(['all', 'completed', 'processing', 'draft'] as const).map((f) => (
+        {filters.map((f) => (
           <button
-            key={f}
-            className={`filter-btn ${filter === f ? 'active' : ''}`}
-            onClick={() => setFilter(f)}
+            key={f.key}
+            className={`filter-btn ${filter === f.key ? 'active' : ''}`}
+            onClick={() => setFilter(f.key)}
           >
-            {f === 'all' ? '全部' : f === 'completed' ? '已完成' : f === 'processing' ? '进行中' : '草稿'}
+            {f.label}
+            <span className="filter-count">
+              {f.key === 'all' ? projects.length : projects.filter(p => p.status === f.key).length}
+            </span>
           </button>
         ))}
       </div>
 
       {loading ? (
-        <div className="loading">加载中...</div>
-      ) : filteredProjects.length === 0 ? (
-        <div className="empty-state">
-          <p>{projects.length === 0 ? '暂无调研项目' : '没有找到相关项目'}</p>
-        </div>
-      ) : (
-        <div className="project-list animate-stagger">
-          {filteredProjects.map((project) => (
-            <Link key={project.id} href={`/projects/${project.id}`} className="project-item card">
-              <div className="project-main">
-                <div className="project-header">
-                  <h3>{project.title}</h3>
-                  {getStatusBadge(project.status)}
-                </div>
-                <div className="project-meta">
-                  <span>{formatDate(project.created_at)}</span>
-                  <span>·</span>
-                  <span>{project.status === 'completed' ? '已完成' : project.status === 'processing' ? '进行中' : '草稿'}</span>
-                </div>
-              </div>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="chevron">
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </Link>
+        <div className="loading-list">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i} className="skeleton-item card">
+              <div className="skeleton" style={{ height: '20px', width: '40%', marginBottom: '12px' }}></div>
+              <div className="skeleton" style={{ height: '14px', width: '30%' }}></div>
+            </div>
           ))}
         </div>
+      ) : filteredProjects.length === 0 ? (
+        <div className="empty-state card">
+          <div className="empty-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+          </div>
+          <h3>{projects.length === 0 ? '暂无调研项目' : '没有找到相关项目'}</h3>
+          <p>{projects.length === 0 ? '创建一个新的调研项目开始吧' : '尝试切换筛选条件'}</p>
+          {projects.length === 0 && (
+            <Link href="/" className="btn btn-primary">
+              立即开始调研
+            </Link>
+          )}
+        </div>
+      ) : (
+        <div className="project-list">
+          {filteredProjects.map((project, index) => {
+            const statusConfig = getStatusConfig(project.status);
+            return (
+              <Link
+                key={project.id}
+                href={`/projects?id=${project.id}`}
+                className="project-item card animate-fade-in-up"
+                style={{ animationDelay: `${index * 50}ms` }}
+              >
+                <div className="project-icon">
+                  {statusConfig.icon === 'check' && (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                  {statusConfig.icon === 'loader' && (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="spin">
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                  )}
+                  {statusConfig.icon === 'edit' && (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                  )}
+                </div>
+
+                <div className="project-main">
+                  <div className="project-header">
+                    <h3>{project.title}</h3>
+                    <span className={`status-badge ${statusConfig.className}`}>
+                      {statusConfig.label}
+                    </span>
+                  </div>
+                  <div className="project-meta">
+                    <span className="meta-item">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="4" width="18" height="18" rx="2" />
+                        <path d="M16 2v4M8 2v4M3 10h18" />
+                      </svg>
+                      {formatDate(project.created_at)}
+                    </span>
+                  </div>
+                </div>
+
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="chevron">
+                  <path d="M9 18l6-6-6-6" />
+                </svg>
+              </Link>
+            );
+          })}
+        </div>
       )}
-
-      <style jsx>{`
-        .projects-page {
-          max-width: 900px;
-          margin: 0 auto;
-          padding: 2rem 1.5rem 4rem;
-        }
-
-        .page-header {
-          margin-bottom: 1.5rem;
-        }
-
-        .header-content {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-
-        .page-header h1 {
-          font-size: 1.75rem;
-        }
-
-        .filter-bar {
-          display: flex;
-          gap: 0.5rem;
-          margin-bottom: 1.5rem;
-          padding-bottom: 1rem;
-          border-bottom: 1px solid var(--border-light);
-        }
-
-        .filter-btn {
-          padding: 0.5rem 1rem;
-          font-size: 0.875rem;
-          font-weight: 500;
-          color: var(--foreground-secondary);
-          background: transparent;
-          border: none;
-          border-radius: var(--radius-md);
-          cursor: pointer;
-          transition: all var(--transition-fast);
-        }
-
-        .filter-btn:hover {
-          background: var(--background-subtle);
-          color: var(--foreground);
-        }
-
-        .filter-btn.active {
-          background: var(--color-primary-light);
-          color: var(--color-primary);
-        }
-
-        .project-list {
-          display: flex;
-          flex-direction: column;
-          gap: 0.75rem;
-        }
-
-        .project-item {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          padding: 1.25rem;
-          text-decoration: none;
-        }
-
-        .project-main {
-          flex: 1;
-        }
-
-        .project-header {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          margin-bottom: 0.5rem;
-        }
-
-        .project-header h3 {
-          font-size: 1rem;
-          font-weight: 600;
-          color: var(--foreground);
-        }
-
-        .status-badge {
-          font-size: 0.75rem;
-          font-weight: 500;
-          padding: 0.25rem 0.625rem;
-          border-radius: 9999px;
-        }
-
-        .status-completed {
-          background: #ecfdf5;
-          color: #059669;
-        }
-
-        .status-processing {
-          background: #fef3c7;
-          color: #d97706;
-        }
-
-        .status-draft {
-          background: var(--background-subtle);
-          color: var(--foreground-secondary);
-        }
-
-        .project-meta {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          font-size: 0.8125rem;
-          color: var(--foreground-muted);
-        }
-
-        .chevron {
-          color: var(--foreground-muted);
-        }
-
-        .empty-state {
-          text-align: center;
-          padding: 4rem 2rem;
-          color: var(--foreground-muted);
-        }
-
-        .loading {
-          text-align: center;
-          padding: 4rem 2rem;
-          color: var(--foreground-muted);
-        }
-      `}</style>
     </div>
   );
 }

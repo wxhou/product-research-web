@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Navbar from "@/components/layout/Navbar";
 import "./globals.css";
+import { Agentation } from "agentation";
 
 export const metadata: Metadata = {
   title: "Product Research - 产品调研助手",
@@ -19,6 +20,7 @@ export default function RootLayout({
         <div className="main-content">
           {children}
         </div>
+        {process.env.NODE_ENV === "development" && <Agentation />}
       </body>
     </html>
   );
