@@ -386,7 +386,9 @@ interface SearchService {
 export class DataSourceManager {
   private services: Map<DataSourceType, SearchService> = new Map();
   private enabledSources: Set<DataSourceType> = new Set([
-    'rss-hackernews', 'rss-techcrunch', 'rss-theverge', 'duckduckgo', 'github'
+    // 全部免费数据源默认启用
+    'rss-hackernews', 'rss-techcrunch', 'rss-theverge', 'rss-wired', 'rss-producthunt',
+    'duckduckgo', 'github'
   ]);
 
   constructor() {
