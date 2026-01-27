@@ -1,8 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import ThemeToggle from './ThemeToggle';
 
 const navItems = [
   { href: '/', label: '首页', icon: 'home' },
@@ -13,6 +15,7 @@ const navItems = [
 export default function Navbar() {
   const pathname = usePathname();
   const { user, isAuthenticated, isAdmin, logout, loading } = useAuth();
+  const [dropdownOpen, setDropdownOpen] = useState(false);
 
   return (
     <header className="navbar">
@@ -52,24 +55,41 @@ export default function Navbar() {
         </nav>
 
         <div className="navbar-actions">
+          <ThemeToggle />
           {!loading && isAuthenticated && (
-            <>
-              <span className="user-badge">
-                {isAdmin && <span className="admin-tag">Admin</span>}
-                {user?.username}
-              </span>
+            <div className="user-menu-wrapper">
               <button
-                className="action-btn logout-btn"
-                onClick={() => logout()}
-                aria-label="登出"
+                className="user-badge"
+                onClick={() => setDropdownOpen(!dropdownOpen)}
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                  <polyline points="16 17 21 12 16 7" />
-                  <line x1="21" y1="12" x2="9" y2="12" />
+                {user?.username}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="6 9 12 15 18 9" />
                 </svg>
               </button>
-            </>
+              {dropdownOpen && (
+                <div className="user-dropdown">
+                  <div className="dropdown-user-info">
+                    <span className="dropdown-username">{user?.username}</span>
+                    {isAdmin && <span className="dropdown-admin-tag">管理员</span>}
+                  </div>
+                  <button
+                    className="dropdown-item logout-btn"
+                    onClick={() => {
+                      logout();
+                      setDropdownOpen(false);
+                    }}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                      <polyline points="16 17 21 12 16 7" />
+                      <line x1="21" y1="12" x2="9" y2="12" />
+                    </svg>
+                    退出登录
+                  </button>
+                </div>
+              )}
+            </div>
           )}
           {!loading && !isAuthenticated && (
             <Link href="/auth" className="btn btn-primary btn-sm">

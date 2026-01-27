@@ -8,6 +8,8 @@ interface Project {
   description: string;
   keywords: string;
   status: string;
+  progress: number;
+  progress_message: string;
   created_at: string;
   updated_at: string;
 }
@@ -80,7 +82,7 @@ export async function GET(request: NextRequest) {
 
       // 获取关联的搜索结果和报告
       const searchResults = searchResultDb.getByProject.all({ project_id: id }) as SearchResult[];
-      const report = reportDb.getByProject.get({ project_id: id }) as Report | undefined;
+      const report = reportDb.getByProject.get({ project_id: id }) as (Report & { used_llm: number }) | undefined;
 
       return NextResponse.json({
         success: true,
@@ -89,16 +91,28 @@ export async function GET(request: NextRequest) {
           keywords: JSON.parse(project.keywords || '[]'),
           searchResults,
           report,
+          used_llm: report?.used_llm ?? 0,
         },
       });
     }
 
     // 获取项目列表，管理员看所有，普通用户只看自己的
-    let projects: Project[];
+    let projects: Array<Project & { used_llm: number | null }>;
     if (user.role === 'admin') {
-      projects = projectDb.getAll.all() as Project[];
+      projects = db.prepare(`
+        SELECT p.*, r.used_llm
+        FROM projects p
+        LEFT JOIN reports r ON p.id = r.project_id
+        ORDER BY p.created_at DESC
+      `).all() as Array<Project & { used_llm: number | null }>;
     } else {
-      projects = projectDb.getByUser.all({ user_id: user.id }) as Project[];
+      projects = db.prepare(`
+        SELECT p.*, r.used_llm
+        FROM projects p
+        LEFT JOIN reports r ON p.id = r.project_id
+        WHERE p.user_id = ?
+        ORDER BY p.created_at DESC
+      `).all(user.id) as Array<Project & { used_llm: number | null }>;
     }
 
     return NextResponse.json({ success: true, data: projects });
@@ -111,7 +125,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/projects - 创建新项目
+// POST /api/projects - 创建新项目 或 重试失败的项目
 export async function POST(request: NextRequest) {
   try {
     const user = getCurrentUser(request);
@@ -123,6 +137,42 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const url = new URL(request.url);
+    const retryId = url.searchParams.get('id');
+
+    // 重试失败的项目
+    if (retryId) {
+      const existing = projectDb.getById.get({ id: retryId }) as Project | undefined;
+      if (!existing) {
+        return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
+      }
+
+      // 检查权限
+      if (user.role !== 'admin' && existing.user_id !== user.id) {
+        return NextResponse.json({ success: false, error: 'Permission denied' }, { status: 403 });
+      }
+
+      // 只有失败的项目可以重试
+      if (existing.status !== 'failed') {
+        return NextResponse.json({ success: false, error: 'Only failed projects can be retried' }, { status: 400 });
+      }
+
+      // 重置项目状态为 draft
+      projectDb.update.run({
+        id: retryId,
+        title: existing.title,
+        description: existing.description || '',
+        keywords: existing.keywords,
+        status: 'draft',
+        progress: 0,
+        progress_message: '',
+      });
+
+      const updated = projectDb.getById.get({ id: retryId }) as Project | undefined;
+      return NextResponse.json({ success: true, data: updated });
+    }
+
+    // 创建新项目
     const body = await request.json();
     let { title, description, keywords } = body;
 
@@ -169,6 +219,8 @@ export async function POST(request: NextRequest) {
       description,
       keywords: JSON.stringify(keywords),
       status: 'draft',
+      progress: 0,
+      progress_message: '',
     });
 
     const project = projectDb.getById.get({ id }) as Project | undefined;
@@ -252,6 +304,8 @@ export async function PUT(request: NextRequest) {
       description: description || existing.description || '',
       keywords: keywords ? JSON.stringify(keywords) : existing.keywords,
       status: status || existing.status,
+      progress: existing.progress || 0,
+      progress_message: existing.progress_message || '',
     });
 
     const updated = projectDb.getById.get({ id }) as Project | undefined;

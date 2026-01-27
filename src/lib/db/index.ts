@@ -47,6 +47,8 @@ function initDatabase() {
         description TEXT,
         keywords TEXT,
         status TEXT DEFAULT 'draft',
+        progress INTEGER DEFAULT 0,
+        progress_message TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -76,8 +78,24 @@ function initDatabase() {
         content TEXT NOT NULL,
         mermaid_charts TEXT,
         version INTEGER DEFAULT 1,
+        used_llm INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+
+      -- 调研任务表（后台任务队列）
+      CREATE TABLE IF NOT EXISTS research_tasks (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL UNIQUE,
+        user_id TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        priority INTEGER DEFAULT 0,
+        error TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        started_at DATETIME,
+        completed_at DATETIME,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       );
 
       -- 数据源配置表
@@ -105,6 +123,8 @@ function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_search_results_source ON search_results(source);
       CREATE INDEX IF NOT EXISTS idx_reports_project ON reports(project_id);
       CREATE INDEX IF NOT EXISTS idx_data_sources_active ON data_sources(is_active);
+      CREATE INDEX IF NOT EXISTS idx_research_tasks_status ON research_tasks(status);
+      CREATE INDEX IF NOT EXISTS idx_research_tasks_user ON research_tasks(user_id);
     `);
   } else {
     // 迁移现有数据库
@@ -169,6 +189,60 @@ function initDatabase() {
       }
     }
 
+    // 迁移：添加 progress 和 progress_message 列到 projects 表
+    const checkProjectColumn = (column: string) => {
+      try {
+        db.prepare(`SELECT ${column} FROM projects LIMIT 1`).get();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    if (!checkProjectColumn('progress')) {
+      try {
+        db.exec(`ALTER TABLE projects ADD COLUMN progress INTEGER DEFAULT 0`);
+      } catch (e) {
+        // 忽略错误
+      }
+    }
+
+    if (!checkProjectColumn('progress_message')) {
+      try {
+        db.exec(`ALTER TABLE projects ADD COLUMN progress_message TEXT`);
+      } catch (e) {
+        // 忽略错误
+      }
+    }
+
+    // 创建 research_tasks 表（如果不存在）
+    const hasResearchTasks = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='research_tasks'").get();
+    if (!hasResearchTasks) {
+      try {
+        db.exec(`
+          -- 调研任务表（后台任务队列）
+          CREATE TABLE IF NOT EXISTS research_tasks (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL UNIQUE,
+            user_id TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            priority INTEGER DEFAULT 0,
+            error TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            started_at DATETIME,
+            completed_at DATETIME,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_research_tasks_status ON research_tasks(status);
+          CREATE INDEX IF NOT EXISTS idx_research_tasks_user ON research_tasks(user_id);
+        `);
+      } catch (e) {
+        console.error('Failed to create research_tasks table:', e);
+      }
+    }
+
     // 检查是否需要创建 default 用户
     const defaultUser = db.prepare("SELECT id FROM users WHERE username = 'default'").get();
     if (!defaultUser) {
@@ -213,6 +287,13 @@ function initDatabase() {
   for (const source of defaultSources) {
     insertSource.run(source);
   }
+
+  // 迁移：为现有表添加 used_llm 字段
+  try {
+    db.prepare("ALTER TABLE reports ADD COLUMN used_llm INTEGER DEFAULT 0").run();
+  } catch (e) {
+    // 字段已存在，忽略错误
+  }
 }
 
 // 立即初始化数据库
@@ -252,8 +333,8 @@ export const userDb = {
 // 项目相关操作
 export const projectDb = {
   create: db.prepare(`
-    INSERT INTO projects (id, user_id, title, description, keywords, status)
-    VALUES (@id, @user_id, @title, @description, @keywords, @status)
+    INSERT INTO projects (id, user_id, title, description, keywords, status, progress, progress_message)
+    VALUES (@id, @user_id, @title, @description, @keywords, @status, @progress, @progress_message)
   `),
 
   getById: db.prepare(`
@@ -276,17 +357,110 @@ export const projectDb = {
     SELECT * FROM projects WHERE status = @status ORDER BY created_at DESC
   `),
 
+  // 更新项目状态和进度
   update: db.prepare(`
     UPDATE projects SET
       title = @title,
       description = @description,
       keywords = @keywords,
       status = @status,
+      progress = @progress,
+      progress_message = @progress_message,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id
+  `),
+
+  // 仅更新进度
+  updateProgress: db.prepare(`
+    UPDATE projects SET
+      progress = @progress,
+      progress_message = @progress_message,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id
+  `),
+
+  // 仅更新状态
+  updateStatus: db.prepare(`
+    UPDATE projects SET
+      status = @status,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
   `),
 
   delete: db.prepare(`DELETE FROM projects WHERE id = @id`),
+};
+
+// 调研任务相关操作
+export const taskDb = {
+  create: db.prepare(`
+    INSERT INTO research_tasks (id, project_id, user_id, status)
+    VALUES (@id, @project_id, @user_id, @status)
+  `),
+
+  getById: db.prepare(`
+    SELECT * FROM research_tasks WHERE id = @id
+  `),
+
+  getByProject: db.prepare(`
+    SELECT * FROM research_tasks WHERE project_id = @project_id
+  `),
+
+  // 获取等待中的任务（按优先级排序）
+  getPending: db.prepare(`
+    SELECT * FROM research_tasks
+    WHERE status = 'pending'
+    ORDER BY priority DESC, created_at ASC
+    LIMIT 1
+  `),
+
+  // 获取用户进行中的任务数量
+  getProcessingCount: db.prepare(`
+    SELECT COUNT(*) as count FROM research_tasks
+    WHERE user_id = @user_id AND status = 'processing'
+  `).get as (params: { user_id: string }) => { count: number },
+
+  // 获取用户等待中的任务数量
+  getPendingCount: db.prepare(`
+    SELECT COUNT(*) as count FROM research_tasks
+    WHERE user_id = @user_id AND status = 'pending'
+  `).get as (params: { user_id: string }) => { count: number },
+
+  // 更新任务状态
+  updateStatus: db.prepare(`
+    UPDATE research_tasks SET
+      status = @status,
+      started_at = CASE WHEN @status = 'processing' THEN CURRENT_TIMESTAMP ELSE started_at END,
+      completed_at = CASE WHEN @status IN ('completed', 'failed') THEN CURRENT_TIMESTAMP ELSE completed_at END,
+      error = @error
+    WHERE id = @id
+  `),
+
+  // 更新任务为进行中
+  markProcessing: db.prepare(`
+    UPDATE research_tasks SET
+      status = 'processing',
+      started_at = CURRENT_TIMESTAMP
+    WHERE id = @id
+  `),
+
+  // 更新任务为完成
+  markCompleted: db.prepare(`
+    UPDATE research_tasks SET
+      status = 'completed',
+      completed_at = CURRENT_TIMESTAMP
+    WHERE id = @id
+  `),
+
+  // 更新任务为失败
+  markFailed: db.prepare(`
+    UPDATE research_tasks SET
+      status = 'failed',
+      completed_at = CURRENT_TIMESTAMP,
+      error = @error
+    WHERE id = @id
+  `),
+
+  deleteByProject: db.prepare(`DELETE FROM research_tasks WHERE project_id = @project_id`),
 };
 
 // 搜索结果相关操作
@@ -306,9 +480,11 @@ export const searchResultDb = {
 // 报告相关操作
 export const reportDb = {
   create: db.prepare(`
-    INSERT INTO reports (id, project_id, user_id, title, content, mermaid_charts)
-    VALUES (@id, @project_id, @user_id, @title, @content, @mermaid_charts)
+    INSERT INTO reports (id, project_id, user_id, title, content, mermaid_charts, used_llm)
+    VALUES (@id, @project_id, @user_id, @title, @content, @mermaid_charts, @used_llm)
   `),
+
+  deleteByProject: db.prepare(`DELETE FROM reports WHERE project_id = @project_id`),
 
   getAll: db.prepare(`
     SELECT * FROM reports ORDER BY created_at DESC

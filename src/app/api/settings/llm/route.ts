@@ -28,10 +28,10 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       data: config || {
-        provider: 'openai',
+        provider: 'modelscope',
         baseUrl: null,
         apiKey: null,
-        modelName: 'gpt-4',
+        modelName: 'deepseek-ai/DeepSeek-R1-0528',
         temperature: 0.7,
         timeout: 120,
       },
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
     const { provider, baseUrl, apiKey, modelName, temperature, timeout } = body as Partial<LLMConfig>;
 
     // 验证输入
-    const validProviders = ['openai', 'azure', 'anthropic', 'deepseek', 'gemini', 'moonshot', 'compatible'];
+    const validProviders = ['openai', 'azure', 'anthropic', 'deepseek', 'gemini', 'moonshot', 'modelscope', 'siliconflow', 'compatible'];
     if (provider && !validProviders.includes(provider)) {
       return NextResponse.json(
         { success: false, error: 'Invalid provider' },
@@ -76,7 +76,8 @@ export async function POST(request: NextRequest) {
 
     const config: LLMConfig = {
       provider: provider || 'openai',
-      baseUrl: baseUrl || null,
+      // 只有兼容模式才保存自定义 baseUrl，否则设为 null
+      baseUrl: (provider === 'compatible' || provider === 'azure') ? (baseUrl || null) : null,
       apiKey: apiKey || null,
       modelName: modelName || null,
       temperature: temperature || 0.7,

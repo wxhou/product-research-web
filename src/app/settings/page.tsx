@@ -4,6 +4,69 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 
+// 可用模型列表
+const MODEL_OPTIONS: Record<string, Array<{ value: string; label: string; desc?: string }>> = {
+  deepseek: [
+    { value: 'deepseek-ai/DeepSeek-R1', label: 'DeepSeek-R1', desc: '推理模型，适合复杂分析' },
+    { value: 'deepseek-ai/DeepSeek-V3', label: 'DeepSeek-V3', desc: '通用对话，性价比高' },
+    { value: 'deepseek-ai/DeepSeek-V3.2', label: 'DeepSeek-V3.2', desc: '最新版本，支持工具调用' },
+    { value: 'deepseek-ai/DeepSeek-V2.5', label: 'DeepSeek-V2.5', desc: '平衡性能与速度' },
+  ],
+  moonshot: [
+    { value: 'moonshot-v1-8k', label: 'Moonshot-V1 8K', desc: '基础上下文 8K' },
+    { value: 'moonshot-v1-32k', label: 'Moonshot-V1 32K', desc: '长上下文 32K' },
+    { value: 'moonshot-v1-128k', label: 'Moonshot-V1 128K', desc: '超长上下文 128K' },
+    { value: 'moonshot-v1-k2', label: 'Moonshot-K2', desc: '最新开源思考模型' },
+  ],
+  modelscope: [
+    // DeepSeek - 最新版本放在前面作为默认
+    { value: 'deepseek-ai/DeepSeek-R1-0528', label: 'DeepSeek-R1-0528', desc: '最新升级版，推荐默认' },
+    { value: 'deepseek-ai/DeepSeek-R1', label: 'DeepSeek-R1', desc: '推理模型' },
+    { value: 'deepseek-ai/DeepSeek-V3', label: 'DeepSeek-V3', desc: '通用对话' },
+    // Qwen 系列
+    { value: 'Qwen/Qwen2.5-72B-Instruct', label: 'Qwen2.5-72B-Instruct', desc: '阿里千问旗舰' },
+    { value: 'Qwen/Qwen2.5-32B-Instruct', label: 'Qwen2.5-32B-Instruct', desc: '高性能平衡' },
+    { value: 'Qwen/Qwen2.5-7B-Instruct', label: 'Qwen2.5-7B-Instruct', desc: '轻量快速' },
+    { value: 'Qwen/Qwen3-8B', label: 'Qwen3-8B', desc: '最新 8B' },
+    { value: 'Qwen/Qwen3-14B', label: 'Qwen3-14B', desc: '最新 14B' },
+    { value: 'Qwen/Qwen3-32B', label: 'Qwen3-32B', desc: '最新 32B' },
+    { value: 'Qwen/QwQ-32B', label: 'QwQ-32B', desc: '思考模型' },
+    { value: 'Qwen/Qwen2.5-VL-72B-Instruct', label: 'Qwen2.5-VL-72B', desc: '视觉语言模型' },
+    // GLM
+    { value: 'ZhipuAI/GLM-4.7-Flash', label: 'GLM-4.7-Flash', desc: '智谱轻量版' },
+    // Yi
+    { value: '01ai/Yi-1.5-34B-Instruct', label: 'Yi-1.5-34B-Instruct', desc: '零一万物' },
+  ],
+  siliconflow: [
+    // DeepSeek
+    { value: 'deepseek-ai/DeepSeek-R1', label: 'DeepSeek-R1', desc: '推理模型' },
+    { value: 'deepseek-ai/DeepSeek-V3', label: 'DeepSeek-V3', desc: '通用对话' },
+    { value: 'deepseek-ai/DeepSeek-V3.2', label: 'DeepSeek-V3.2', desc: '最新版本' },
+    { value: 'deepseek-ai/DeepSeek-V3.1-Terminus', label: 'DeepSeek-V3.1-Terminus', desc: '稳定版本' },
+    // Qwen
+    { value: 'Qwen/Qwen3-8B', label: 'Qwen3-8B', desc: '最新 8B' },
+    { value: 'Qwen/Qwen3-14B', label: 'Qwen3-14B', desc: '最新 14B' },
+    { value: 'Qwen/Qwen3-32B', label: 'Qwen3-32B', desc: '最新 32B' },
+    { value: 'Qwen/QwQ-32B', label: 'QwQ-32B', desc: '思考模型' },
+    { value: 'Qwen/Qwen2.5-72B-Instruct', label: 'Qwen2.5-72B', desc: '千问旗舰' },
+    { value: 'Qwen/Qwen2.5-32B-Instruct', label: 'Qwen2.5-32B', desc: '高性能' },
+    { value: 'Qwen/Qwen2.5-7B-Instruct', label: 'Qwen2.5-7B', desc: '轻量级' },
+    { value: 'Qwen/Qwen2.5-Coder-32B-Instruct', label: 'Qwen2.5-Coder-32B', desc: '代码专用' },
+    // GLM
+    { value: 'Pro/zai-org/GLM-4.7', label: 'GLM-4.7', desc: '智谱最新旗舰' },
+    { value: 'Pro/glm-4-plus', label: 'GLM-4-Plus', desc: '智谱旗舰' },
+    { value: 'Pro/glm-4v', label: 'GLM-4V', desc: '视觉模型' },
+    // Llama
+    { value: 'meta-llama/Llama-3.1-70B-Instruct', label: 'Llama-3.1-70B', desc: 'Meta 开源' },
+    { value: 'meta-llama/Llama-3.3-70B-Instruct', label: 'Llama-3.3-70B', desc: '最新 Llama' },
+    // 腾讯
+    { value: 'tencent/Hunyuan-A13B-Instruct', label: 'Hunyuan-A13B', desc: '腾讯混元' },
+  ],
+  compatible: [
+    { value: 'custom', label: '自定义模型', desc: '手动输入模型名称和 API 地址' },
+  ],
+};
+
 interface DataSource {
   id: string;
   name: string;
@@ -27,6 +90,14 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // 默认使用 ModelScope + DeepSeek-R1-0528
+  const [selectedProvider, setSelectedProvider] = useState('modelscope');
+  const [llmConfig, setLlmConfig] = useState<{
+    provider: string;
+    modelName: string;
+    apiKey?: string;
+    temperature: number;
+  } | null>(null);
   const router = useRouter();
   const { isAdmin, isAuthenticated, loading: authLoading } = useAuth();
 
@@ -41,6 +112,7 @@ export default function SettingsPage() {
   useEffect(() => {
     if (isAuthenticated) {
       fetchDataSources();
+      fetchLLMConfig();
     }
   }, [isAuthenticated]);
 
@@ -83,6 +155,22 @@ export default function SettingsPage() {
       showMessage('error', '加载数据源失败');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchLLMConfig = async () => {
+    try {
+      const res = await fetch('/api/settings/llm');
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+      const data = await res.json();
+      if (data.success && data.data) {
+        const config = data.data;
+        setLlmConfig(config);
+        // 更新表单状态
+        setSelectedProvider(config.provider || 'modelscope');
+      }
+    } catch (error) {
+      console.error('Failed to fetch LLM config:', error);
     }
   };
 
@@ -263,6 +351,18 @@ export default function SettingsPage() {
             <h2>大模型配置</h2>
             <p>配置用于 AI 分析和报告生成的大模型 API</p>
           </div>
+          {llmConfig?.apiKey && (
+            <div className="current-model-badge">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6M4.22 19.78l4.24-4.24M15.54 8.46l4.24-4.24" />
+              </svg>
+              <span>
+                当前使用: <strong>{llmConfig.modelName}</strong>
+                {llmConfig.temperature !== 0.7 && ` (温度: ${llmConfig.temperature})`}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="preference-card card">
@@ -280,18 +380,21 @@ export default function SettingsPage() {
                 <p>选择使用的大模型服务</p>
               </div>
             </div>
-            <select className="input select" id="provider" defaultValue="openai">
-              <option value="openai">OpenAI (GPT-4)</option>
-              <option value="azure">Azure OpenAI</option>
-              <option value="anthropic">Anthropic (Claude)</option>
+            <select
+              className="input select"
+              id="provider"
+              value={selectedProvider}
+              onChange={(e) => setSelectedProvider(e.target.value)}
+            >
+              <option value="modelscope">ModelScope (魔搭)</option>
               <option value="deepseek">DeepSeek (Chat)</option>
-              <option value="gemini">Google Gemini</option>
               <option value="moonshot">Moonshot (Kimi)</option>
+              <option value="siliconflow">SiliconFlow (硅基流动)</option>
               <option value="compatible">OpenAI 兼容 API (本地/自定义)</option>
             </select>
           </div>
 
-          <div className="preference-item" id="base-url-item" style={{ display: 'none' }}>
+          <div className="preference-item" id="base-url-item" style={{ display: selectedProvider === 'compatible' ? 'flex' : 'none' }}>
             <div className="preference-info">
               <div className="preference-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -308,7 +411,7 @@ export default function SettingsPage() {
               type="text"
               className="input"
               id="base-url"
-              placeholder="https://api.openai.com/v1"
+              placeholder="https://your-custom-api.com/v1"
             />
           </div>
 
@@ -346,15 +449,26 @@ export default function SettingsPage() {
               </div>
               <div>
                 <h3>模型名称</h3>
-                <p>输入具体的模型名称</p>
+                <p>{selectedProvider === 'compatible' ? '输入自定义模型名称' : '选择要使用的模型'}</p>
               </div>
             </div>
-            <input
-              type="text"
-              className="input"
-              id="model-name"
-              placeholder="gpt-4, claude-3-5-sonnet, 自定义模型名"
-            />
+            {selectedProvider === 'compatible' ? (
+              <input
+                type="text"
+                className="input"
+                id="model-name"
+                placeholder="如: gpt-4o, claude-3-5-sonnet"
+              />
+            ) : (
+              <select className="input select" id="model-name">
+                {MODEL_OPTIONS[selectedProvider]?.map((model) => (
+                  <option key={model.value} value={model.value}>
+                    {model.label}
+                    {model.desc ? ` - ${model.desc}` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="preference-item">
@@ -450,6 +564,18 @@ export default function SettingsPage() {
                     tempValue.textContent = config.temperature;
                   }
                   if (config.timeout) document.getElementById('timeout').value = config.timeout;
+
+                  // 更新当前使用模型的显示
+                  const currentModelBadge = document.querySelector('.current-model-badge');
+                  if (config.apiKey && config.modelName) {
+                    if (currentModelBadge) {
+                      const modelSpan = currentModelBadge.querySelector('span');
+                      if (modelSpan) {
+                        const tempStr = config.temperature !== 0.7 ? ' (temp: ' + config.temperature + ')' : '';
+                        modelSpan.innerHTML = 'Current: <strong>' + config.modelName + '</strong>' + tempStr;
+                      }
+                    }
+                  }
                 }
               } catch (e) {
                 console.error('Failed to load LLM config:', e);
@@ -475,6 +601,17 @@ export default function SettingsPage() {
                 });
                 const data = await res.json();
                 if (data.success) {
+                  // 重新加载配置并更新页面显示
+                  await loadConfig();
+                  // 更新当前使用模型的显示
+                  const currentModelBadge = document.querySelector('.current-model-badge');
+                  if (currentModelBadge && data.data && data.data.modelName) {
+                    const modelSpan = currentModelBadge.querySelector('span');
+                    if (modelSpan) {
+                      const tempStr = data.data.temperature !== 0.7 ? ' (temp: ' + data.data.temperature + ')' : '';
+                      modelSpan.innerHTML = 'Current: <strong>' + data.data.modelName + '</strong>' + tempStr;
+                    }
+                  }
                   alert('保存成功');
                 } else {
                   alert('保存失败: ' + data.error);

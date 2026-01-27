@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(document-skills:webapp-testing)",
+      "Skill(agent-browser)",
+      "Bash(npx agent-browser open:*)",
+      "Bash(AGENT_BROWSER_HOME=/Users/wxhou/.claude/skills/agent-browser ./agent-browser:*)",
+      "mcp__search__brave_web_search",
+      "WebFetch(domain:github.com)",
+      "Bash(agent-browser --version)",
+      "Bash(agent-browser open:*)",
+      "mcp__chrome-devtools__new_page",
+      "mcp__chrome-devtools__take_snapshot",
+      "mcp__chrome-devtools__emulate",
+      "mcp__chrome-devtools__take_screenshot",
+      "mcp__chrome-devtools__navigate_page",
+      "mcp__chrome-devtools__fill",
+      "Bash(npm install:*)",
+      "mcp__chrome-devtools__close_page",
+      "mcp__chrome-devtools__click",
+      "mcp__chrome-devtools__evaluate_script",
+      "Bash(grep:*)",
+      "mcp__ide__getDiagnostics",
+      "WebFetch(domain:docs.siliconflow.cn)",
+      "WebFetch(domain:platform.moonshot.cn)",
+      "Bash(npm run build:*)",
+      "Bash(sqlite3:*)"
+    ]
+  }
+}

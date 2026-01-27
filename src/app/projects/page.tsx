@@ -9,15 +9,18 @@ interface Project {
   id: string;
   title: string;
   created_at: string;
-  status: 'completed' | 'processing' | 'draft';
+  status: 'completed' | 'processing' | 'pending' | 'draft' | 'failed';
   keywords: string;
+  progress: number;
+  progress_message: string;
+  used_llm: number | null;
 }
 
 function ProjectsContent() {
   const searchParams = useSearchParams();
   const projectIdFromQuery = searchParams?.get('id') || null;
 
-  const [filter, setFilter] = useState<'all' | 'completed' | 'processing' | 'draft'>('all');
+  const [filter, setFilter] = useState<'all' | 'completed' | 'processing' | 'pending' | 'draft' | 'failed'>('all');
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -42,6 +45,28 @@ function ProjectsContent() {
     }
   };
 
+  const retryProject = async (projectId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/api/projects?id=${projectId}`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (data.success) {
+        // 刷新列表
+        fetchProjects();
+        // 跳转到项目详情
+        window.location.href = `/projects?id=${projectId}`;
+      } else {
+        alert('重试失败: ' + (data.error || '未知错误'));
+      }
+    } catch (error) {
+      console.error('Failed to retry project:', error);
+      alert('重试失败');
+    }
+  };
+
   const filteredProjects = filter === 'all'
     ? projects
     : projects.filter(p => p.status === filter);
@@ -58,16 +83,20 @@ function ProjectsContent() {
   const getStatusConfig = (status: Project['status']) => {
     const config = {
       completed: { label: '已完成', className: 'status-completed', icon: 'check' },
-      processing: { label: '进行中', className: 'status-processing', icon: 'loader' },
+      processing: { label: '调研中', className: 'status-processing', icon: 'loader' },
+      pending: { label: '等待中', className: 'status-pending', icon: 'clock' },
       draft: { label: '草稿', className: 'status-draft', icon: 'edit' },
+      failed: { label: '失败', className: 'status-failed', icon: 'alert' },
     };
     return config[status];
   };
 
   const filters = [
     { key: 'all', label: '全部' },
+    { key: 'pending', label: '等待中' },
+    { key: 'processing', label: '调研中' },
     { key: 'completed', label: '已完成' },
-    { key: 'processing', label: '进行中' },
+    { key: 'failed', label: '失败' },
     { key: 'draft', label: '草稿' },
   ] as const;
 
@@ -157,10 +186,23 @@ function ProjectsContent() {
                       <path d="M21 12a9 9 0 1 1-6.219-8.56" />
                     </svg>
                   )}
+                  {statusConfig.icon === 'clock' && (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                  )}
                   {statusConfig.icon === 'edit' && (
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                       <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                  )}
+                  {statusConfig.icon === 'alert' && (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="12" cy="12" r="10" />
+                      <line x1="12" y1="8" x2="12" y2="12" />
+                      <line x1="12" y1="16" x2="12.01" y2="16" />
                     </svg>
                   )}
                 </div>
@@ -180,12 +222,34 @@ function ProjectsContent() {
                       </svg>
                       {formatDate(project.created_at)}
                     </span>
+                    {/* 显示进度信息 */}
+                    {(project.status === 'pending' || project.status === 'processing') && project.progress_message && (
+                      <span className="meta-item" style={{ marginLeft: '1rem', color: 'var(--foreground-muted)' }}>
+                        {project.progress}%
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="chevron">
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
+                <div className="project-actions">
+                  {project.status === 'failed' && (
+                    <button
+                      className="retry-btn"
+                      onClick={(e) => retryProject(project.id, e)}
+                      title="重新开始调研"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M23 4v6h-6" />
+                        <path d="M1 20v-6h6" />
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                      </svg>
+                      重试
+                    </button>
+                  )}
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="chevron">
+                    <path d="M9 18l6-6-6-6" />
+                  </svg>
+                </div>
               </Link>
             );
           })}

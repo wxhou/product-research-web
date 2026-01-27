@@ -8,6 +8,8 @@
  * - Anthropic (Claude)
  * - Google Gemini
  * - Moonshot (Kimi)
+ * - ModelScope (魔搭)
+ * - SiliconFlow (硅基流动)
  * - 任何 OpenAI 兼容的本地/自定义 API
  */
 
@@ -83,6 +85,10 @@ function getBaseUrl(config: LLMConfig): string {
       return 'https://generativelanguage.googleapis.com/v1beta';
     case 'moonshot':
       return 'https://api.moonshot.cn/v1';
+    case 'modelscope':
+      return 'https://api-inference.modelscope.cn/v1';
+    case 'siliconflow':
+      return 'https://api.siliconflow.cn/v1';
     default:
       return 'https://api.openai.com/v1';
   }

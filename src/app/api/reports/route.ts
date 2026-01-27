@@ -8,6 +8,7 @@ interface Report {
   content: string;
   mermaid_charts: string;
   version: number;
+  used_llm: number;
   created_at: string;
 }
 
@@ -95,6 +96,7 @@ export async function GET(request: NextRequest) {
           r.content,
           r.mermaid_charts,
           r.version,
+          r.used_llm,
           r.created_at,
           p.title as project_title,
           p.user_id
@@ -111,6 +113,7 @@ export async function GET(request: NextRequest) {
           r.content,
           r.mermaid_charts,
           r.version,
+          r.used_llm,
           r.created_at,
           p.title as project_title,
           p.user_id
