@@ -627,9 +627,9 @@ select.input {
   margin: 0 auto;
   padding: 0 1.5rem;
   height: 64px;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  justify-content: space-between;
   position: relative;
 }
 
@@ -639,6 +639,7 @@ select.input {
   gap: 0.75rem;
   text-decoration: none;
   transition: opacity var(--transition-fast);
+  justify-self: start;
 }
 
 .logo:hover {
@@ -660,20 +661,34 @@ select.input {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  /* center nav links using flexbox; take available space and center children */
-  flex: 1 1 auto;
-  justify-content: center;
-  position: static;
-  transform: none;
-}
-
-/* ensure logo and actions do not stretch */
-.logo {
-  flex: 0 0 auto;
+  justify-self: center;
 }
 
 .navbar-actions {
-  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  justify-self: end;
+}
+
+.user-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--foreground-secondary);
+  font-weight: 500;
+}
+
+.admin-tag {
+  font-size: 0.625rem;
+  font-weight: 600;
+  padding: 0.125rem 0.375rem;
+  background: var(--color-accent);
+  color: white;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .nav-link {
@@ -694,12 +709,6 @@ select.input {
 .nav-link.active {
   color: var(--color-primary);
   background: var(--color-primary-light);
-}
-
-.navbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
 }
 
 .action-btn {
@@ -1536,6 +1545,12 @@ select.input {
 }
 
 /* Reports List Page */
+.reports-page {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
 .reports-page .report-list {
   display: flex;
   flex-direction: column;
@@ -1694,35 +1709,42 @@ select.input {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 2.5rem;
+  max-width: 900px;
+  margin: 0 auto;
 }
 
 /* Markdown 渲染样式 - 直接使用选择器 */
 .report-body h1 {
   font-size: 1.75rem;
-  margin: 2rem 0 1rem;
-  padding-bottom: 0.5rem;
+  margin: 1.5rem 0 1rem;
+  padding-bottom: 0.75rem;
   border-bottom: 1px solid var(--border-light);
 }
 
 .report-body h1:first-child {
   margin-top: 0;
   border-bottom: none;
+  padding-bottom: 0;
 }
 
 .report-body h2 {
   font-size: 1.375rem;
-  margin: 2rem 0 1rem;
+  margin: 2rem 0 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-light);
 }
 
 .report-body h3 {
   font-size: 1.125rem;
-  margin: 1.5rem 0 0.75rem;
+  margin: 1.5rem 0 0.5rem;
   color: var(--foreground-secondary);
+  font-weight: 600;
 }
 
 .report-body h4 {
   font-size: 1rem;
   margin: 1.25rem 0 0.5rem;
+  font-weight: 600;
 }
 
 .report-body p {
@@ -1761,20 +1783,76 @@ select.input {
 }
 
 .report-body pre {
-  background: var(--background-subtle);
+  background: #0d1117;
   border-radius: var(--radius-md);
   padding: 1rem;
   overflow-x: auto;
   margin: 1rem 0;
+  border: 1px solid var(--border-light);
 }
 
 .report-body pre code {
   display: block;
-  font-family: 'SF Mono', Monaco, monospace;
+  font-family: 'SF Mono', Monaco, Consolas, monospace;
   font-size: 0.875rem;
-  color: var(--foreground);
+  color: #c9d1d9;
   background: transparent;
   padding: 0;
+  line-height: 1.6;
+}
+
+/* Highlight.js token colors for GitHub Dark theme */
+.report-body pre code .hljs-keyword,
+.report-body pre code .hljs-selector-tag,
+.report-body pre code .hljs-built_in {
+  color: #ff7b72;
+}
+
+.report-body pre code .hljs-string,
+.report-body pre code .hljs-attr {
+  color: #a5d6ff;
+}
+
+.report-body pre code .hljs-number {
+  color: #79c0ff;
+}
+
+.report-body pre code .hljs-comment {
+  color: #8b949e;
+  font-style: italic;
+}
+
+.report-body pre code .hljs-function {
+  color: #d2a8ff;
+}
+
+.report-body pre code .hljs-variable,
+.report-body pre code .hljs-template-variable {
+  color: #ffa657;
+}
+
+.report-body pre code .hljs-title,
+.report-body pre code .hljs-class {
+  color: #7ee787;
+}
+
+.report-body pre code .hljs-attr {
+  color: #79c0ff;
+}
+
+.report-body pre code .hljs-symbol,
+.report-body pre code .hljs-bullet {
+  color: #f0883e;
+}
+
+.report-body pre code .hljs-addition {
+  color: #aff5b4;
+  background-color: #033a16;
+}
+
+.report-body pre code .hljs-deletion {
+  color: #ffdcd7;
+  background-color: #67060c;
 }
 
 .report-body hr {
@@ -1786,32 +1864,46 @@ select.input {
 .report-body .table-wrapper {
   overflow-x: auto;
   margin: 1rem 0;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
 }
 
 .report-body table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 200px;
 }
 
 .report-body tr {
   border-bottom: 1px solid var(--border-light);
 }
 
+.report-body tr:last-child {
+  border-bottom: none;
+}
+
 .report-body th,
 .report-body td {
-  padding: 0.75rem 0.5rem;
+  padding: 0.75rem 1rem;
   font-size: 0.875rem;
   color: var(--foreground-secondary);
   text-align: left;
+  white-space: nowrap;
 }
 
 .report-body th {
   font-weight: 600;
   color: var(--foreground);
+  background: var(--background-subtle);
+  border-bottom: 1px solid var(--border);
+}
+
+.report-body tbody tr:hover {
+  background: var(--background-subtle);
 }
 
 .mermaid-container {
-  margin-top: 2rem;
+  margin: 1.5rem 0;
 }
 
 .mermaid-container > div {
@@ -1821,16 +1913,34 @@ select.input {
 
 .report-body .mermaid-chart {
   margin: 1.5rem 0;
-  padding: 1rem;
+  padding: 1.5rem;
   background: var(--background-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   text-align: center;
   overflow-x: auto;
+  border: 1px solid var(--border-light);
 }
 
 .report-body .mermaid-chart svg {
   max-width: 100%;
   height: auto;
+}
+
+.report-body .mermaid-error {
+  padding: 1rem;
+  background: var(--error-light);
+  border-radius: var(--radius-md);
+  color: var(--error);
+  margin: 1rem 0;
+}
+
+.report-body .mermaid-error pre {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  overflow-x: auto;
+  background: transparent;
+  border: none;
+  color: inherit;
 }
 
 /* 设置页样式 */
@@ -2235,4 +2345,349 @@ select.input {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+/* Auth 登录页面样式 - 街角咖啡厅氛围 */
+.auth-page {
+  min-height: calc(100vh - 64px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  position: relative;
+  overflow: hidden;
+  background: #1a120b;
+}
+
+/* 背景 - 街角咖啡厅夜景 */
+.auth-bg {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  z-index: 0;
+}
+
+/* 基础街景背景 - 温暖的咖啡色调 */
+.auth-bg::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 20% 30%, rgba(255, 160, 60, 0.4) 0%, transparent 45%),
+    radial-gradient(ellipse at 70% 20%, rgba(255, 140, 50, 0.35) 0%, transparent 40%),
+    radial-gradient(ellipse at 50% 80%, rgba(255, 180, 80, 0.3) 0%, transparent 50%),
+    radial-gradient(ellipse at 85% 70%, rgba(255, 170, 90, 0.25) 0%, transparent 35%),
+    radial-gradient(ellipse at 15% 75%, rgba(255, 150, 70, 0.3) 0%, transparent 40%),
+    linear-gradient(180deg, #2a1a0a 0%, #3d2515 50%, #1a120b 100%);
+}
+
+/* 散景光斑 - 街灯和咖啡店灯光效果 */
+.auth-bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 25% 35%, rgba(255, 220, 150, 0.5) 0%, transparent 25%),
+    radial-gradient(circle at 75% 25%, rgba(255, 190, 100, 0.45) 0%, transparent 22%),
+    radial-gradient(circle at 60% 75%, rgba(255, 200, 120, 0.4) 0%, transparent 28%),
+    radial-gradient(circle at 15% 70%, rgba(255, 210, 160, 0.35) 0%, transparent 20%),
+    radial-gradient(circle at 85% 60%, rgba(255, 180, 110, 0.4) 0%, transparent 25%),
+    radial-gradient(circle at 40% 55%, rgba(255, 195, 130, 0.3) 0%, transparent 30%),
+    radial-gradient(circle at 90% 85%, rgba(255, 215, 170, 0.35) 0%, transparent 18%);
+}
+
+/* 浮动光斑 - 更大的氛围光 */
+.auth-bg-shape {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(25px);
+}
+
+.shape-1 {
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(255, 200, 100, 0.4) 0%, transparent 70%);
+  top: 10%;
+  left: 5%;
+  animation: float-slow 20s ease-in-out infinite;
+}
+
+.shape-2 {
+  width: 350px;
+  height: 350px;
+  background: radial-gradient(circle, rgba(255, 170, 80, 0.35) 0%, transparent 70%);
+  top: 40%;
+  right: 5%;
+  animation: float-slow 25s ease-in-out infinite;
+  animation-delay: -10s;
+}
+
+.shape-3 {
+  width: 300px;
+  height: 300px;
+  background: radial-gradient(circle, rgba(255, 190, 110, 0.3) 0%, transparent 70%);
+  bottom: 10%;
+  left: 30%;
+  animation: float-slow 30s ease-in-out infinite;
+  animation-delay: -15s;
+}
+
+/* 水珠效果 - 玻璃上的凝结水珠 */
+.auth-droplets {
+  position: absolute;
+  inset: 0;
+  z-index: 0.5;
+  pointer-events: none;
+  background-image:
+    radial-gradient(ellipse 12px 10px at 15% 25%, rgba(255, 255, 255, 0.35) 0%, transparent 70%),
+    radial-gradient(ellipse 10px 8px at 35% 40%, rgba(255, 255, 255, 0.3) 0%, transparent 70%),
+    radial-gradient(ellipse 14px 12px at 55% 20%, rgba(255, 255, 255, 0.35) 0%, transparent 70%),
+    radial-gradient(ellipse 8px 7px at 75% 35%, rgba(255, 255, 255, 0.28) 0%, transparent 70%),
+    radial-gradient(ellipse 11px 9px at 25% 65%, rgba(255, 255, 255, 0.32) 0%, transparent 70%),
+    radial-gradient(ellipse 13px 11px at 65% 60%, rgba(255, 255, 255, 0.35) 0%, transparent 70%),
+    radial-gradient(ellipse 7px 6px at 85% 80%, rgba(255, 255, 255, 0.28) 0%, transparent 70%),
+    radial-gradient(ellipse 9px 8px at 45% 75%, rgba(255, 255, 255, 0.3) 0%, transparent 70%),
+    radial-gradient(ellipse 11px 9px at 90% 45%, rgba(255, 255, 255, 0.25) 0%, transparent 70%),
+    radial-gradient(ellipse 8px 6px at 20% 85%, rgba(255, 255, 255, 0.28) 0%, transparent 70%),
+    radial-gradient(ellipse 6px 5px at 50% 10%, rgba(255, 255, 255, 0.3) 0%, transparent 70%),
+    radial-gradient(ellipse 10px 8px at 80% 15%, rgba(255, 255, 255, 0.28) 0%, transparent 70%),
+    radial-gradient(ellipse 5px 4px at 10% 55%, rgba(255, 255, 255, 0.25) 0%, transparent 70%),
+    radial-gradient(ellipse 8px 7px at 70% 85%, rgba(255, 255, 255, 0.3) 0%, transparent 70%),
+    radial-gradient(ellipse 4px 3px at 95% 30%, rgba(255, 255, 255, 0.25) 0%, transparent 70%);
+  animation: droplet-shift 60s linear infinite;
+}
+
+/* 玻璃划痕和纹理 */
+.auth-glass-texture {
+  position: absolute;
+  inset: 0;
+  z-index: 0.6;
+  pointer-events: none;
+  background:
+    linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.08) 36%, rgba(255, 255, 255, 0.04) 37%, transparent 38%),
+    linear-gradient(165deg, transparent 55%, rgba(255, 255, 255, 0.06) 56%, rgba(255, 255, 255, 0.03) 57%, transparent 58%),
+    linear-gradient(45deg, transparent 25%, rgba(255, 255, 255, 0.05) 26%, rgba(255, 255, 255, 0.02) 27%, transparent 28%),
+    linear-gradient(135deg, transparent 40%, rgba(255, 255, 255, 0.07) 41%, rgba(255, 255, 255, 0.03) 42%, transparent 43%);
+}
+
+@keyframes float-slow {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(20px, -30px); }
+  50% { transform: translate(-15px, 15px); }
+  75% { transform: translate(30px, 10px); }
+}
+
+@keyframes droplet-shift {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-8px, 5px); }
+}
+
+/* 登录卡片 - 真正的玻璃效果 */
+.auth-card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 380px;
+}
+
+.auth-card-inner {
+  background: rgba(25, 18, 12, 0.12);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  border-radius: 28px;
+  padding: 3.5rem 2.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow:
+    0 25px 50px -12px rgba(0, 0, 0, 0.1),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+/* 登录标题 */
+.auth-card-title {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+
+.auth-card-title h1 {
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: #f8fafc;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.02em;
+}
+
+.auth-card-title p {
+  font-size: 0.9375rem;
+  color: rgba(168, 162, 158, 0.7);
+  margin: 0;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.auth-error {
+  padding: 0.875rem 1rem;
+  background: rgba(220, 38, 38, 0.15);
+  color: #fca5a5;
+  border-radius: 12px;
+  font-size: 0.875rem;
+  text-align: center;
+  border: 1px solid rgba(220, 38, 38, 0.3);
+}
+
+/* 输入框样式 */
+.auth-input-wrapper {
+  position: relative;
+  transition: transform 0.3s ease;
+}
+
+.auth-input-wrapper.focused {
+  transform: translateY(-2px);
+}
+
+.auth-input {
+  width: 100%;
+  padding: 1rem 1.25rem;
+  font-size: 1rem;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  color: #f8fafc;
+  transition: all 0.3s ease;
+}
+
+.auth-input::placeholder {
+  color: rgba(168, 162, 158, 0.6);
+  font-weight: 400;
+}
+
+.auth-input:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.auth-input:focus {
+  outline: none;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(26, 95, 74, 0.2);
+}
+
+.auth-input-border {
+  display: none;
+}
+
+/* 按钮样式 */
+.auth-btn {
+  width: 100%;
+  padding: 1rem 1.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  background: linear-gradient(135deg, var(--color-primary) 0%, #2d8a6e 100%);
+  color: white;
+  border: none;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-top: 0.5rem;
+  position: relative;
+  overflow: hidden;
+  letter-spacing: 0.02em;
+}
+
+.auth-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 50%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.auth-btn:hover:not(:disabled)::before {
+  opacity: 1;
+}
+
+.auth-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(26, 95, 74, 0.35);
+}
+
+.auth-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.auth-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.auth-btn-loading {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* 提示文字 */
+.auth-hint {
+  text-align: center;
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.8125rem;
+  color: rgba(168, 162, 158, 0.6);
+}
+
+/* 淡入动画 */
+.fade-in {
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 加载状态 */
+.auth-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  color: rgba(168, 162, 158, 0.8);
+  position: relative;
+  z-index: 1;
+}
+
+.auth-loading-spinner {
+  width: 36px;
+  height: 36px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 1rem;
+}
+
+/* 响应式调整 */
+@media (max-width: 480px) {
+  .auth-card-inner {
+    padding: 2.5rem 1.75rem;
+  }
 }

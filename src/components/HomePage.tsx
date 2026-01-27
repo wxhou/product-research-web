@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Project {
   id: string;
@@ -18,11 +19,21 @@ export default function HomePage() {
   const [recentProjects, setRecentProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
+
+  // 客户端导航到首页时，额外检查认证状态
+  useEffect(() => {
+    if (!loading && !isAuthenticated) {
+      router.replace('/auth');
+    }
+  }, [isAuthenticated, loading, router]);
 
   // 获取最近项目
   useEffect(() => {
-    fetchProjects();
-  }, []);
+    if (isAuthenticated) {
+      fetchProjects();
+    }
+  }, [isAuthenticated]);
 
   const fetchProjects = async () => {
     try {

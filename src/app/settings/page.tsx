@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface DataSource {
   id: string;
@@ -25,10 +27,22 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const router = useRouter();
+  const { isAdmin, isAuthenticated, loading: authLoading } = useAuth();
 
+  // 权限检查
   useEffect(() => {
-    fetchDataSources();
-  }, []);
+    if (!authLoading && !isAuthenticated) {
+      router.replace('/auth');
+    }
+  }, [authLoading, isAuthenticated, router]);
+
+  // 加载数据
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchDataSources();
+    }
+  }, [isAuthenticated]);
 
   const fetchDataSources = async () => {
     try {
@@ -121,6 +135,24 @@ export default function SettingsPage() {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 3000);
   };
+
+  // 非管理员访问时显示拒绝页面
+  if (!authLoading && isAuthenticated && !isAdmin) {
+    return (
+      <div className="settings-page">
+        <div className="access-denied card">
+          <div className="access-denied-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <rect x="3" y="11" width="18" height="11" rx="2" />
+              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+            </svg>
+          </div>
+          <h2>访问被拒绝</h2>
+          <p>只有管理员才能访问设置页面</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="settings-page">

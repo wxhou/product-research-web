@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import ReportViewer from '../../components/ReportViewer';
@@ -18,7 +18,7 @@ interface Project {
   title: string;
 }
 
-export default function ReportsPage() {
+function ReportsContent() {
   const searchParams = useSearchParams();
   const reportIdFromQuery = searchParams?.get('id') || null;
 
@@ -148,5 +148,28 @@ export default function ReportsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function LoadingFallback() {
+  return (
+    <div className="reports-page">
+      <div className="loading-list">
+        {[1, 2, 3, 4].map(i => (
+          <div key={i} className="skeleton-item card">
+            <div className="skeleton" style={{ height: '20px', width: '40%', marginBottom: '12px' }}></div>
+            <div className="skeleton" style={{ height: '14px', width: '30%' }}></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function ReportsPage() {
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <ReportsContent />
+    </Suspense>
   );
 }

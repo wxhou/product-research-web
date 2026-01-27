@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Navbar from "@/components/layout/Navbar";
+import { AuthProviderWrapper } from "@/components/AuthProviderWrapper";
 import "./globals.css";
 import { Agentation } from "agentation";
 
@@ -16,10 +17,12 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body>
-        <Navbar />
-        <div className="main-content">
-          {children}
-        </div>
+        <AuthProviderWrapper>
+          <Navbar />
+          <div className="main-content">
+            {children}
+          </div>
+        </AuthProviderWrapper>
         {process.env.NODE_ENV === "development" && <Agentation />}
       </body>
     </html>

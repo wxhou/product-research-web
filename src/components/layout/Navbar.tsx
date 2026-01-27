@@ -2,16 +2,17 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 
 const navItems = [
   { href: '/', label: '首页', icon: 'home' },
   { href: '/projects', label: '项目', icon: 'folder' },
   { href: '/reports', label: '报告', icon: 'file' },
-  { href: '/settings', label: '设置', icon: 'settings' },
 ];
 
 export default function Navbar() {
   const pathname = usePathname();
+  const { user, isAuthenticated, isAdmin, logout, loading } = useAuth();
 
   return (
     <header className="navbar">
@@ -39,18 +40,42 @@ export default function Navbar() {
               </Link>
             );
           })}
+          {/* 只有管理员才能看到设置链接 */}
+          {isAdmin && (
+            <Link
+              href="/settings"
+              className={`nav-link ${pathname === '/settings' ? 'active' : ''}`}
+            >
+              设置
+            </Link>
+          )}
         </nav>
 
         <div className="navbar-actions">
-          <button className="action-btn" aria-label="通知">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-            </svg>
-          </button>
-          <div className="avatar">
-            <span>P</span>
-          </div>
+          {!loading && isAuthenticated && (
+            <>
+              <span className="user-badge">
+                {isAdmin && <span className="admin-tag">Admin</span>}
+                {user?.username}
+              </span>
+              <button
+                className="action-btn logout-btn"
+                onClick={() => logout()}
+                aria-label="登出"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+              </button>
+            </>
+          )}
+          {!loading && !isAuthenticated && (
+            <Link href="/auth" className="btn btn-primary btn-sm">
+              登录
+            </Link>
+          )}
         </div>
       </div>
     </header>

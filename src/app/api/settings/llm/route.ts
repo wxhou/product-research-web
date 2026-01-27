@@ -13,7 +13,7 @@ interface LLMConfig {
 // GET /api/settings/llm
 export async function GET() {
   try {
-    const result = settingsDb.get.get({ key: 'llm_config' });
+    const result = settingsDb.get.get({ key: 'llm_config' }) as { value: string } | undefined;
     let config: LLMConfig | null = null;
 
     if (result?.value) {

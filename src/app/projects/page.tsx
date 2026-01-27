@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import ProjectViewer from '../../components/ProjectViewer';
@@ -13,7 +13,7 @@ interface Project {
   keywords: string;
 }
 
-export default function ProjectsPage() {
+function ProjectsContent() {
   const searchParams = useSearchParams();
   const projectIdFromQuery = searchParams?.get('id') || null;
 
@@ -192,5 +192,28 @@ export default function ProjectsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function LoadingFallback() {
+  return (
+    <div className="projects-page">
+      <div className="loading-list">
+        {[1, 2, 3, 4].map(i => (
+          <div key={i} className="skeleton-item card">
+            <div className="skeleton" style={{ height: '20px', width: '40%', marginBottom: '12px' }}></div>
+            <div className="skeleton" style={{ height: '14px', width: '30%' }}></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function ProjectsPage() {
+  return (
+    <Suspense fallback={<LoadingFallback />}>
+      <ProjectsContent />
+    </Suspense>
   );
 }

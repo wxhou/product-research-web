@@ -1,8 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { projectDb, searchResultDb, reportDb } from '@/lib/db';
+import { projectDb, searchResultDb, reportDb, settingsDb } from '@/lib/db';
 import { getDataSourceManager, type SearchResult } from '@/lib/datasources';
 import { analyzeSearchResults, generateFullReport, type AnalysisResult } from '@/lib/analysis';
 import { generateText, getLLMConfig, PRODUCT_ANALYST_PROMPT } from '@/lib/llm';
+
+// 获取当前用户信息
+function getCurrentUser(request: NextRequest): { id: string; username: string; role: string } | null {
+  const sessionToken = request.cookies.get('auth_token')?.value;
+  if (!sessionToken) return null;
+
+  try {
+    const result = settingsDb.get.get({ key: `session_${sessionToken}` }) as { value: string } | undefined;
+    if (result?.value) {
+      return JSON.parse(result.value);
+    }
+  } catch (e) {
+    console.error('Failed to get session:', e);
+  }
+  return null;
+}
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substr(2);
@@ -388,6 +404,16 @@ export async function POST(request: NextRequest) {
   let projectId: string | undefined;
 
   try {
+    const user = getCurrentUser(request);
+
+    // 未登录用户无法执行调研
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: 'Not authenticated' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
     const { projectId: pid, keywords } = body;
     projectId = pid;
@@ -405,6 +431,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { success: false, error: 'Project not found' },
         { status: 404 }
+      );
+    }
+
+    // 检查权限：普通用户只能操作自己的项目
+    if (user.role !== 'admin' && project.user_id !== user.id) {
+      return NextResponse.json(
+        { success: false, error: 'Permission denied' },
+        { status: 403 }
       );
     }
 
@@ -453,6 +487,7 @@ export async function POST(request: NextRequest) {
           searchResultDb.create.run({
             id: searchId,
             project_id: projectId,
+            user_id: user.id,
             source,
             query: project.title,
             url: result.url,
@@ -488,6 +523,7 @@ export async function POST(request: NextRequest) {
                 searchResultDb.create.run({
                   id: searchId,
                   project_id: projectId,
+                  user_id: user.id,
                   source,
                   query: competitor,
                   url: result.url,
@@ -524,6 +560,7 @@ export async function POST(request: NextRequest) {
     reportDb.create.run({
       id: reportId,
       project_id: projectId,
+      user_id: user.id,
       title: `${project.title} - 调研报告`,
       content: reportContent,
       mermaid_charts: mermaidCharts,

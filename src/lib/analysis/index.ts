@@ -85,7 +85,7 @@ export interface MarketData {
 
 export interface MermaidChart {
   id: string;
-  type: 'bar' | 'quadrant' | 'timeline' | 'pie' | 'mindmap';
+  type: 'bar' | 'quadrant' | 'timeline' | 'pie' | 'mindmap' | 'flowchart' | 'graph' | 'gantt' | 'sequence' | 'classDiagram' | 'stateDiagram' | 'erDiagram' | 'journey' | 'pie' | 'xychart';
   title: string;
   content: string;
 }
@@ -317,12 +317,12 @@ function generateMermaidCharts(
   const charts: MermaidChart[] = [];
   const totalResults = searchResults.length || 1;
 
-  // 1. 功能频率图 (使用简单的 gantt 或其他稳定图表)
+  // 1. 功能频率图 (使用条形图)
   const topFeatures = features.slice(0, 8);
   if (topFeatures.length > 0) {
     charts.push({
       id: 'feature-frequency',
-      type: 'gantt',
+      type: 'bar',
       title: '功能频率分布',
       content: 'gantt\n  title 功能出现频率统计\n  dateFormat X\n  axisFormat %s\n' + topFeatures.map(f => '  section ' + f.name + '\n  ' + f.name + ' : 0, ' + (f.count * 3)).join('\n'),
     });
@@ -459,7 +459,7 @@ export function generateFullReport(
     '```mermaid\n' + (featureChart?.content || '') + '\n```\n\n' +
     '## 功能对比矩阵\n\n' +
     '| 功能 | ' + competitors.slice(0, 3).map(c => c.name).join(' | ') + ' |\n' +
-    '------' + '------|'.repeat(Math.min(3, competitors.length)) + '\n' +
+    '|------|' + '------|'.repeat(Math.min(3, competitors.length)) + '\n' +
     featureMatrix + '\n\n' +
     '## 2. SWOT 分析\n\n' +
     '### 优势 (Strengths)\n' +

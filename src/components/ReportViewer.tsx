@@ -4,7 +4,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
 import mermaid from 'mermaid';
+import 'highlight.js/styles/github-dark.css';
 
 interface Report {
   id: string;
@@ -34,7 +36,6 @@ export default function ReportViewer({ reportId }: { reportId: string }) {
       theme: 'default',
       securityLevel: 'loose',
       fontFamily: 'inherit',
-      xychart: { theme: 'base' },
     });
   }, []);
 
@@ -60,56 +61,88 @@ export default function ReportViewer({ reportId }: { reportId: string }) {
 
   const processMermaidBlocks = useCallback(async () => {
     if (!containerRef.current) return;
-    const preElements = containerRef.current.querySelectorAll('pre');
-    const chartConfigs: { id: string; code: string }[] = [];
 
-    for (let i = 0; i < preElements.length; i++) {
-      const preEl = preElements[i];
-      const codeEl = preEl.querySelector('code');
-      if (!codeEl) continue;
-      const className = codeEl.className || '';
-      if (!className.includes('mermaid') && !className.includes('language-mermaid')) continue;
-      let code = codeEl.textContent || '';
-      code = code.replace(/<pre\s+class\s*=\s*["']mermaid["']>[\s\S]*?<\/pre>/gi, '');
-      code = code.replace(/<pre class=mermaid>[\s\S]*?<\/pre>/gi, '');
-      code = code.trim();
-      if (code.startsWith('mermaid')) code = code.substring('mermaid'.length).trim();
-      if (!code) continue;
+    // Find all mermaid code blocks in various formats
+    const mermaidBlocks: { element: HTMLElement; code: string }[] = [];
 
-      const hash = code.slice(0, 100);
-      if (renderedChartsRef.current.has(hash)) continue;
-
-      // Create a mermaid container div and set its text to the diagram source
-      const mermaidDiv = document.createElement('div');
-      mermaidDiv.className = 'mermaid';
-      mermaidDiv.textContent = code;
-
-      // Replace the pre element with the mermaid div
-      preEl.replaceWith(mermaidDiv);
-
-      // mark for initialization
-      renderedChartsRef.current.add(hash);
-    }
-
-    // Initialize mermaid on any newly added .mermaid elements inside the container
-    try {
-      const elems = containerRef.current.querySelectorAll('.mermaid');
-      if (elems.length > 0) {
-        mermaid.init(undefined, Array.from(elems) as HTMLElement[]);
+    // 1. Find code blocks with class "mermaid" or "language-mermaid"
+    const codeElements = containerRef.current.querySelectorAll('code[class*="mermaid"], code[class*="language-mermaid"]');
+    codeElements.forEach((codeEl) => {
+      const preEl = codeEl.closest('pre');
+      if (preEl) {
+        let code = codeEl.textContent || '';
+        // Remove "mermaid" prefix if present
+        code = code.replace(/^mermaid\s*/i, '').trim();
+        mermaidBlocks.push({ element: preEl as HTMLElement, code });
       }
+    });
+
+    // 2. Find pre.mermaid elements (raw HTML format)
+    const preMermaidElements = containerRef.current.querySelectorAll('pre.mermaid');
+    preMermaidElements.forEach((preEl) => {
+      let code = preEl.textContent || '';
+      // Check if it contains a mermaid div inside
+      const mermaidDiv = preEl.querySelector('div.mermaid');
+      if (mermaidDiv) {
+        code = mermaidDiv.textContent || '';
+      }
+      code = code.replace(/^mermaid\s*/i, '').trim();
+      if (code) {
+        mermaidBlocks.push({ element: preEl as HTMLElement, code });
+      }
+    });
+
+    // 3. Find div.mermaid elements directly
+    const mermaidDivs = containerRef.current.querySelectorAll('div.mermaid');
+    mermaidDivs.forEach((divEl) => {
+      const preEl = divEl.closest('pre');
+      if (preEl) {
+        // This mermaid div might already be processed, skip
+        return;
+      }
+      let code = divEl.textContent || '';
+      code = code.replace(/^mermaid\s*/i, '').trim();
+      if (code) {
+        mermaidBlocks.push({ element: divEl as HTMLElement, code });
+      }
+    });
+
+    if (mermaidBlocks.length === 0) return;
+
+    // Create unique IDs for each diagram
+    const chartElements: HTMLElement[] = [];
+
+    mermaidBlocks.forEach(({ element, code }, index) => {
+      const chartId = `mermaid-chart-${reportId}-${Date.now()}-${index}`;
+
+      // Create a new container for the chart
+      const chartContainer = document.createElement('div');
+      chartContainer.className = 'mermaid-chart';
+      chartContainer.id = chartId;
+      chartContainer.textContent = code;
+
+      // Replace the original element with the chart container
+      element.replaceWith(chartContainer);
+      chartElements.push(chartContainer);
+    });
+
+    // Use mermaid.run() for async rendering
+    try {
+      await mermaid.run({
+        nodes: chartElements,
+        suppressErrors: true,
+      });
     } catch (error) {
-      console.error('mermaid.init failed:', error);
-      // fallback: render raw code blocks inside a wrapper
-      const elems = containerRef.current.querySelectorAll('.mermaid');
-      elems.forEach((el) => {
-        const text = (el.textContent || '').trim();
-        const wrapper = document.createElement('div');
-        wrapper.className = 'mermaid-error';
-        wrapper.innerHTML = `<pre class="mermaid">${text}</pre>`;
-        el.replaceWith(wrapper);
+      console.error('mermaid.run failed:', error);
+      // Fallback: show error message
+      chartElements.forEach((el, index) => {
+        el.innerHTML = `<div class="mermaid-error" style="padding: 1rem; background: #fee2e2; border-radius: 8px; color: #dc2626;">
+          <strong>图表渲染失败</strong>
+          <pre style="margin: 0.5rem 0 0; font-size: 0.75rem; overflow-x: auto;">${el.textContent}</pre>
+        </div>`;
       });
     }
-  }, []);
+  }, [reportId]);
 
   useEffect(() => {
     if (!loading && report) {
@@ -154,39 +187,42 @@ export default function ReportViewer({ reportId }: { reportId: string }) {
   };
 
   const components = {
-    h1: ({ children }: { children: React.ReactNode }) => <h1 className="report-h1">{children}</h1>,
-    h2: ({ children }: { children: React.ReactNode }) => <h2 className="report-h2">{children}</h2>,
-    h3: ({ children }: { children: React.ReactNode }) => <h3 className="report-h3">{children}</h3>,
-    h4: ({ children }: { children: React.ReactNode }) => <h4 className="report-h4">{children}</h4>,
-    p: ({ children }: { children: React.ReactNode }) => <p className="report-p">{children}</p>,
-    ul: ({ children }: { children: React.ReactNode }) => <ul className="report-ul">{children}</ul>,
-    ol: ({ children }: { children: React.ReactNode }) => <ol className="report-ol">{children}</ol>,
-    li: ({ children }: { children: React.ReactNode }) => <li className="report-li">{children}</li>,
-    blockquote: ({ children }: { children: React.ReactNode }) => <blockquote className="report-blockquote">{children}</blockquote>,
-    code: ({ className, children }: { className?: string; children: React.ReactNode }) => {
+    h1: (props: React.ComponentPropsWithoutRef<'h1'>) => <h1 className="report-h1">{props.children}</h1>,
+    h2: (props: React.ComponentPropsWithoutRef<'h2'>) => <h2 className="report-h2">{props.children}</h2>,
+    h3: (props: React.ComponentPropsWithoutRef<'h3'>) => <h3 className="report-h3">{props.children}</h3>,
+    h4: (props: React.ComponentPropsWithoutRef<'h4'>) => <h4 className="report-h4">{props.children}</h4>,
+    p: (props: React.ComponentPropsWithoutRef<'p'>) => <p className="report-p">{props.children}</p>,
+    ul: (props: React.ComponentPropsWithoutRef<'ul'>) => <ul className="report-ul">{props.children}</ul>,
+    ol: (props: React.ComponentPropsWithoutRef<'ol'>) => <ol className="report-ol">{props.children}</ol>,
+    li: (props: React.ComponentPropsWithoutRef<'li'>) => <li className="report-li">{props.children}</li>,
+    blockquote: (props: React.ComponentPropsWithoutRef<'blockquote'>) => <blockquote className="report-blockquote">{props.children}</blockquote>,
+    code: (props: React.ComponentPropsWithoutRef<'code'>) => {
+      const { className, children } = props;
       const isInline = !className;
       if (isInline) return <code className="code-inline">{children}</code>;
-      if (className && (className.includes('mermaid') || className.includes('language-mermaid'))) return <code className={className}>{children}</code>;
-      return <code className={`code-block ${className}`}>{children}</code>;
+      return <code className={`code-block ${className || ''}`}>{children}</code>;
     },
-    pre: ({ children }: { children: React.ReactNode }) => {
-      const codeEl = children as React.ReactElement;
-      if (codeEl?.props?.className?.includes('mermaid') || codeEl?.props?.className?.includes('language-mermaid')) {
-        return <pre className="code-pre">{children}</pre>;
+    pre: (props: React.ComponentPropsWithoutRef<'pre'>) => {
+      const { children } = props;
+      let hasMermaid = false;
+      if (children && typeof children === 'object' && 'props' in children) {
+        const childProps = children.props as { className?: string };
+        const className = childProps?.className || '';
+        hasMermaid = !!(className.includes('mermaid') || className.includes('language-mermaid'));
       }
-      return <pre className="code-pre">{children}</pre>;
+      return <pre className={hasMermaid ? 'code-pre mermaid-original' : 'code-pre'}>{children}</pre>;
     },
     hr: () => <hr className="report-hr" />,
-    table: ({ children }: { children: React.ReactNode }) => (
+    table: (props: React.ComponentPropsWithoutRef<'table'>) => (
       <div className="table-wrapper">
-        <table>{children}</table>
+        <table>{props.children}</table>
       </div>
     ),
-    thead: ({ children }: { children: React.ReactNode }) => <thead>{children}</thead>,
-    tbody: ({ children }: { children: React.ReactNode }) => <tbody>{children}</tbody>,
-    tr: ({ children }: { children: React.ReactNode }) => <tr className="table-row">{children}</tr>,
-    th: ({ children }: { children: React.ReactNode }) => <th className="table-cell table-header">{children}</th>,
-    td: ({ children }: { children: React.ReactNode }) => <td className="table-cell">{children}</td>,
+    thead: (props: React.ComponentPropsWithoutRef<'thead'>) => <thead>{props.children}</thead>,
+    tbody: (props: React.ComponentPropsWithoutRef<'tbody'>) => <tbody>{props.children}</tbody>,
+    tr: (props: React.ComponentPropsWithoutRef<'tr'>) => <tr className="table-row">{props.children}</tr>,
+    th: (props: React.ComponentPropsWithoutRef<'th'>) => <th className="table-cell table-header">{props.children}</th>,
+    td: (props: React.ComponentPropsWithoutRef<'td'>) => <td className="table-cell">{props.children}</td>,
   };
 
   if (loading) {
@@ -273,7 +309,7 @@ export default function ReportViewer({ reportId }: { reportId: string }) {
 
       <article className="report-content">
         <div ref={containerRef} className="report-body">
-          <Markdown components={components} remarkPlugins={[remarkGfm]}>{report.content}</Markdown>
+          <Markdown components={components} remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>{report.content}</Markdown>
         </div>
       </article>
     </div>

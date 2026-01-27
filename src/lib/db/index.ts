@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 
 const dbPath = path.join(process.cwd(), 'data', 'research.db');
 
@@ -15,71 +16,177 @@ const db = new Database(dbPath);
 // 启用外键约束
 db.pragma('foreign_keys = ON');
 
+// 简单密码 hash 函数
+function hashPassword(password: string): string {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
+
 // 初始化数据库表
 function initDatabase() {
-  db.exec(`
-    -- 项目表
-    CREATE TABLE IF NOT EXISTS projects (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      description TEXT,
-      keywords TEXT,
-      status TEXT DEFAULT 'draft',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+  // 检查是否需要迁移（projects 表是否存在）
+  const tableInfo = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").get() as { name: string } | undefined;
+  const needMigration = tableInfo !== undefined;
 
-    -- 搜索结果表
-    CREATE TABLE IF NOT EXISTS search_results (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      source TEXT NOT NULL,
-      query TEXT NOT NULL,
-      url TEXT,
-      title TEXT,
-      content TEXT,
-      raw_data TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-    );
+  if (!needMigration) {
+    // 新数据库 - 完整创建所有表
+    db.exec(`
+      -- 用户表
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT,
+        role TEXT DEFAULT 'user',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
 
-    -- 报告表
-    CREATE TABLE IF NOT EXISTS reports (
-      id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL UNIQUE,
-      title TEXT NOT NULL,
-      content TEXT NOT NULL,
-      mermaid_charts TEXT,
-      version INTEGER DEFAULT 1,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-    );
+      -- 项目表
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        keywords TEXT,
+        status TEXT DEFAULT 'draft',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      );
 
-    -- 数据源配置表
-    CREATE TABLE IF NOT EXISTS data_sources (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL,
-      config TEXT NOT NULL,
-      is_active INTEGER DEFAULT 1,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+      -- 搜索结果表
+      CREATE TABLE IF NOT EXISTS search_results (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        user_id TEXT DEFAULT 'default',
+        source TEXT NOT NULL,
+        query TEXT NOT NULL,
+        url TEXT,
+        title TEXT,
+        content TEXT,
+        raw_data TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
 
-    -- 用户设置表
-    CREATE TABLE IF NOT EXISTS user_settings (
-      key TEXT PRIMARY KEY UNIQUE,
-      value TEXT,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    );
+      -- 报告表
+      CREATE TABLE IF NOT EXISTS reports (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL UNIQUE,
+        user_id TEXT DEFAULT 'default',
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        mermaid_charts TEXT,
+        version INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
 
-    -- 创建索引
-    CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
-    CREATE INDEX IF NOT EXISTS idx_projects_updated_at ON projects(updated_at);
-    CREATE INDEX IF NOT EXISTS idx_search_results_project ON search_results(project_id);
-    CREATE INDEX IF NOT EXISTS idx_search_results_source ON search_results(source);
-    CREATE INDEX IF NOT EXISTS idx_reports_project ON reports(project_id);
-    CREATE INDEX IF NOT EXISTS idx_data_sources_active ON data_sources(is_active);
-  `);
+      -- 数据源配置表
+      CREATE TABLE IF NOT EXISTS data_sources (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        config TEXT NOT NULL,
+        is_active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- 用户设置表
+      CREATE TABLE IF NOT EXISTS user_settings (
+        key TEXT PRIMARY KEY UNIQUE,
+        value TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+
+      -- 创建索引
+      CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id);
+      CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+      CREATE INDEX IF NOT EXISTS idx_projects_updated_at ON projects(updated_at);
+      CREATE INDEX IF NOT EXISTS idx_search_results_project ON search_results(project_id);
+      CREATE INDEX IF NOT EXISTS idx_search_results_source ON search_results(source);
+      CREATE INDEX IF NOT EXISTS idx_reports_project ON reports(project_id);
+      CREATE INDEX IF NOT EXISTS idx_data_sources_active ON data_sources(is_active);
+    `);
+  } else {
+    // 迁移现有数据库
+    // 检查是否已有 users 表
+    const hasUsers = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='users'").get();
+
+    if (!hasUsers) {
+      // 添加 users 表
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS users (
+          id TEXT PRIMARY KEY,
+          username TEXT UNIQUE NOT NULL,
+          password_hash TEXT,
+          role TEXT DEFAULT 'user',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+
+      // 为现有表添加 user_id 列
+      db.exec(`
+        ALTER TABLE projects ADD COLUMN user_id TEXT DEFAULT 'default';
+        ALTER TABLE search_results ADD COLUMN user_id TEXT DEFAULT 'default';
+        ALTER TABLE reports ADD COLUMN user_id TEXT DEFAULT 'default';
+      `);
+
+      // 创建索引
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id);
+      `);
+    }
+
+    // 检查各表是否缺少 user_id 列，并逐个添加
+    const checkColumn = (table: string) => {
+      try {
+        db.prepare(`SELECT user_id FROM ${table} LIMIT 1`).get();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    if (!checkColumn('projects')) {
+      try {
+        db.exec(`ALTER TABLE projects ADD COLUMN user_id TEXT DEFAULT 'default'`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id)`);
+      } catch (e) {
+        // 忽略错误（列可能已存在）
+      }
+    }
+    if (!checkColumn('search_results')) {
+      try {
+        db.exec(`ALTER TABLE search_results ADD COLUMN user_id TEXT DEFAULT 'default'`);
+      } catch (e) {
+        // 忽略错误
+      }
+    }
+    if (!checkColumn('reports')) {
+      try {
+        db.exec(`ALTER TABLE reports ADD COLUMN user_id TEXT DEFAULT 'default'`);
+      } catch (e) {
+        // 忽略错误
+      }
+    }
+
+    // 检查是否需要创建 default 用户
+    const defaultUser = db.prepare("SELECT id FROM users WHERE username = 'default'").get();
+    if (!defaultUser) {
+      db.prepare(`
+        INSERT INTO users (id, username, role)
+        VALUES ('default', 'default', 'user')
+      `).run({ id: 'default', username: 'default', role: 'user' });
+    }
+  }
+
+  // 创建 xadmin 超级管理员（如果不存在）
+  const adminExists = db.prepare("SELECT id FROM users WHERE username = 'xadmin' AND role = 'admin'").get();
+  if (!adminExists) {
+    db.prepare(`
+      INSERT INTO users (id, username, password_hash, role)
+      VALUES ('xadmin', 'xadmin', ?, 'admin')
+    `).run(hashPassword('research2026'));
+  }
 
   // 插入默认数据源
   const defaultSources = [
@@ -111,11 +218,42 @@ function initDatabase() {
 // 立即初始化数据库
 initDatabase();
 
+// 用户相关操作
+export const userDb = {
+  create: db.prepare(`
+    INSERT INTO users (id, username, password_hash, role)
+    VALUES (@id, @username, @password_hash, @role)
+  `),
+
+  getById: db.prepare(`
+    SELECT id, username, role, created_at FROM users WHERE id = @id
+  `),
+
+  getByUsername: db.prepare(`
+    SELECT id, username, password_hash, role, created_at FROM users WHERE username = @username
+  `),
+
+  getAll: db.prepare(`
+    SELECT id, username, role, created_at FROM users ORDER BY created_at DESC
+  `),
+
+  delete: db.prepare(`DELETE FROM users WHERE id = @id`),
+
+  exists: db.prepare(`
+    SELECT 1 FROM users WHERE username = @username
+  `),
+
+  verifyPassword: db.prepare(`
+    SELECT id, username, role FROM users
+    WHERE username = @username AND password_hash = @password_hash
+  `),
+};
+
 // 项目相关操作
 export const projectDb = {
   create: db.prepare(`
-    INSERT INTO projects (id, title, description, keywords, status)
-    VALUES (@id, @title, @description, @keywords, @status)
+    INSERT INTO projects (id, user_id, title, description, keywords, status)
+    VALUES (@id, @user_id, @title, @description, @keywords, @status)
   `),
 
   getById: db.prepare(`
@@ -124,6 +262,14 @@ export const projectDb = {
 
   getAll: db.prepare(`
     SELECT * FROM projects ORDER BY created_at DESC
+  `),
+
+  getByUser: db.prepare(`
+    SELECT * FROM projects WHERE user_id = @user_id ORDER BY created_at DESC
+  `),
+
+  getByUserAndStatus: db.prepare(`
+    SELECT * FROM projects WHERE user_id = @user_id AND status = @status ORDER BY created_at DESC
   `),
 
   getByStatus: db.prepare(`
@@ -146,8 +292,8 @@ export const projectDb = {
 // 搜索结果相关操作
 export const searchResultDb = {
   create: db.prepare(`
-    INSERT INTO search_results (id, project_id, source, query, url, title, content, raw_data)
-    VALUES (@id, @project_id, @source, @query, @url, @title, @content, @raw_data)
+    INSERT INTO search_results (id, project_id, user_id, source, query, url, title, content, raw_data)
+    VALUES (@id, @project_id, @user_id, @source, @query, @url, @title, @content, @raw_data)
   `),
 
   getByProject: db.prepare(`
@@ -160,12 +306,16 @@ export const searchResultDb = {
 // 报告相关操作
 export const reportDb = {
   create: db.prepare(`
-    INSERT INTO reports (id, project_id, title, content, mermaid_charts)
-    VALUES (@id, @project_id, @title, @content, @mermaid_charts)
+    INSERT INTO reports (id, project_id, user_id, title, content, mermaid_charts)
+    VALUES (@id, @project_id, @user_id, @title, @content, @mermaid_charts)
   `),
 
   getAll: db.prepare(`
     SELECT * FROM reports ORDER BY created_at DESC
+  `),
+
+  getByUser: db.prepare(`
+    SELECT * FROM reports WHERE user_id = @user_id ORDER BY created_at DESC
   `),
 
   getByProject: db.prepare(`
@@ -218,5 +368,5 @@ export const settingsDb = {
   `),
 };
 
-export { initDatabase };
+export { initDatabase, hashPassword };
 export default db;

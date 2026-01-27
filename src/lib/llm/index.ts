@@ -51,7 +51,7 @@ const DEFAULT_CONFIG: LLMConfig = {
  */
 export function getLLMConfig(): LLMConfig {
   try {
-    const result = settingsDb.get.get({ key: 'llm_config' });
+    const result = settingsDb.get.get({ key: 'llm_config' }) as { value: string } | undefined;
     if (result?.value) {
       const config = JSON.parse(result.value);
       return { ...DEFAULT_CONFIG, ...config };
@@ -146,7 +146,8 @@ function formatMessages(messages: LLMMessage[], provider: string): Record<string
  */
 function parseResponse(data: Record<string, unknown>, provider: string): LLMResponse {
   if (provider === 'gemini') {
-    const content = (data.candidates as unknown[])?.[0]?.content as { parts?: { text?: string }[] } | undefined;
+    const candidates = data.candidates as unknown[] | undefined;
+    const content = (candidates?.[0] as { content?: { parts?: { text?: string }[] } } | undefined)?.content;
     return {
       content: content?.parts?.[0]?.text || '',
     };

@@ -143,7 +143,19 @@ class DuckDuckGoService implements SearchService {
       );
       if (!res.ok) throw new Error(`DuckDuckGo API error: ${res.status}`);
 
-      const data = await res.json();
+      const text = await res.text();
+      if (!text || text.trim() === '') {
+        return [];
+      }
+
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (parseError) {
+        console.error('DuckDuckGo JSON parse error:', parseError);
+        return [];
+      }
+
       const results: SearchResult[] = [];
 
       // Instant Answer
@@ -171,44 +183,44 @@ class DuckDuckGoService implements SearchService {
       // Also try to get some web results
       if (results.length < limit) {
         // DuckDuckGo HTML search for more results
-        const htmlRes = await fetch(
-          `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=us-en`,
-          { signal: AbortSignal.timeout(15000) }
-        );
-        if (htmlRes.ok) {
-          const html = await htmlRes.text();
-          const linkRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/g;
-          let match: RegExpExecArray | null = null;
-          let count = 0;
-          while ((match = linkRegex.exec(html)) !== null && results.length < limit && count < 5) {
-            if (!results.find(r => r.url === match![1])) {
-              results.push({
-                title: this.stripHtml(match[2]),
-                url: match[1],
-                content: `相关搜索结果: ${match[2]}`,
-                source: 'duckduckgo',
-              });
-              count++;
+        try {
+          const htmlRes = await fetch(
+            `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=us-en`,
+            { signal: AbortSignal.timeout(15000) }
+          );
+          if (htmlRes.ok) {
+            const html = await htmlRes.text();
+            if (html && html.trim()) {
+              const linkRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/g;
+              let match: RegExpExecArray | null = null;
+              let count = 0;
+              while ((match = linkRegex.exec(html)) !== null && results.length < limit && count < 5) {
+                if (!results.find(r => r.url === match![1])) {
+                  results.push({
+                    title: this.stripHtml(match[2]),
+                    url: match[1],
+                    content: `相关搜索结果: ${match[2]}`,
+                    source: 'duckduckgo',
+                  });
+                  count++;
+                }
+              }
             }
           }
+        } catch (htmlError) {
+          // Silently ignore HTML fetch errors
         }
       }
 
       return results.slice(0, limit);
     } catch (error) {
       console.error('DuckDuckGo Search error:', error);
-      return this.getMockResults(query, limit);
+      return [];
     }
   }
 
   private stripHtml(html: string): string {
     return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
-  }
-
-  private getMockResults(query: string, limit: number): SearchResult[] {
-    return [
-      { title: `${query} - 搜索结果`, url: `https://duckduckgo.com/?q=${query}`, content: `关于${query}的搜索结果。`, source: 'duckduckgo' },
-    ].slice(0, limit);
   }
 }
 
@@ -221,9 +233,10 @@ class BingSearchService implements SearchService {
   async search(query: string, limit = 10): Promise<SearchResult[]> {
     const apiKey = getEnv('BING_API_KEY');
 
-    // 无 API Key 时使用模拟数据
+    // 无 API Key 时跳过
     if (!apiKey) {
-      return this.getMockResults(query, limit);
+      console.log('Bing: No API key configured, skipping');
+      return [];
     }
 
     try {
@@ -245,14 +258,8 @@ class BingSearchService implements SearchService {
       }));
     } catch (error) {
       console.error('Bing Search error:', error);
-      return this.getMockResults(query, limit);
+      return [];
     }
-  }
-
-  private getMockResults(query: string, limit: number): SearchResult[] {
-    return [
-      { title: `${query} - Bing 搜索`, url: `https://www.bing.com/search?q=${query}`, content: `关于${query}的搜索结果。`, source: 'bing' },
-    ].slice(0, limit);
   }
 }
 
@@ -306,7 +313,8 @@ class GNewsService implements SearchService {
     const apiKey = getEnv('GNEWS_API_KEY');
 
     if (!apiKey) {
-      return this.getMockResults(query, limit);
+      console.log('GNews: No API key configured, skipping');
+      return [];
     }
 
     try {
@@ -326,14 +334,8 @@ class GNewsService implements SearchService {
       }));
     } catch (error) {
       console.error('GNews error:', error);
-      return this.getMockResults(query, limit);
+      return [];
     }
-  }
-
-  private getMockResults(query: string, limit: number): SearchResult[] {
-    return [
-      { title: `${query} - GNews`, url: `https://gnews.io/search?q=${query}`, content: `关于${query}的新闻。`, source: 'gnews' },
-    ].slice(0, limit);
   }
 }
 
@@ -364,14 +366,8 @@ class GitHubService implements SearchService {
       }));
     } catch (error) {
       console.error('GitHub Search error:', error);
-      return this.getMockResults(query, limit);
+      return [];
     }
-  }
-
-  private getMockResults(query: string, limit: number): SearchResult[] {
-    return [
-      { title: `${query} - GitHub`, url: `https://github.com/search?q=${query}`, content: `关于${query}的开源项目。`, source: 'github' },
-    ].slice(0, limit);
   }
 }
 

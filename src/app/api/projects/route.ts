@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { projectDb, reportDb, searchResultDb } from '@/lib/db';
-
-function generateId(): string {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2);
-}
+import db, { projectDb, reportDb, searchResultDb, settingsDb } from '@/lib/db';
 
 interface Project {
   id: string;
+  user_id: string;
   title: string;
   description: string;
   keywords: string;
@@ -15,11 +12,54 @@ interface Project {
   updated_at: string;
 }
 
+interface SearchResult {
+  id: string;
+  project_id: string;
+  title: string;
+  url: string;
+  content: string;
+  created_at: string;
+}
+
+interface Report {
+  id: string;
+  project_id: string;
+  title: string;
+  content: string;
+  mermaid_charts: string;
+  created_at: string;
+}
+
+// 获取当前用户信息
+function getCurrentUser(request: NextRequest): { id: string; username: string; role: string } | null {
+  const sessionToken = request.cookies.get('auth_token')?.value;
+  if (!sessionToken) return null;
+
+  try {
+    const result = settingsDb.get.get({ key: `session_${sessionToken}` }) as { value: string } | undefined;
+    if (result?.value) {
+      return JSON.parse(result.value);
+    }
+  } catch (e) {
+    console.error('Failed to get session:', e);
+  }
+  return null;
+}
+
 // GET /api/projects - 获取所有项目
 export async function GET(request: NextRequest) {
   try {
+    const user = getCurrentUser(request);
     const url = new URL(request.url);
     const id = url.searchParams.get('id');
+
+    // 未登录用户无法获取数据
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: 'Not authenticated' },
+        { status: 401 }
+      );
+    }
 
     if (id) {
       const project = projectDb.getById.get({ id }) as Project | undefined;
@@ -27,6 +67,14 @@ export async function GET(request: NextRequest) {
         return NextResponse.json(
           { success: false, error: 'Project not found' },
           { status: 404 }
+        );
+      }
+
+      // 检查权限：普通用户只能看自己的项目
+      if (user.role !== 'admin' && project.user_id !== user.id) {
+        return NextResponse.json(
+          { success: false, error: 'Permission denied' },
+          { status: 403 }
         );
       }
 
@@ -45,7 +93,14 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const projects = projectDb.getAll.all() as Project[];
+    // 获取项目列表，管理员看所有，普通用户只看自己的
+    let projects: Project[];
+    if (user.role === 'admin') {
+      projects = projectDb.getAll.all() as Project[];
+    } else {
+      projects = projectDb.getByUser.all({ user_id: user.id }) as Project[];
+    }
+
     return NextResponse.json({ success: true, data: projects });
   } catch (error) {
     console.error('Error fetching projects:', error);
@@ -59,6 +114,15 @@ export async function GET(request: NextRequest) {
 // POST /api/projects - 创建新项目
 export async function POST(request: NextRequest) {
   try {
+    const user = getCurrentUser(request);
+
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: 'Not authenticated' },
+        { status: 401 }
+      );
+    }
+
     const body = await request.json();
     let { title, description, keywords } = body;
 
@@ -97,9 +161,10 @@ export async function POST(request: NextRequest) {
       keywords = [];
     }
 
-    const id = generateId();
+    const id = Date.now().toString(36) + Math.random().toString(36).substr(2);
     projectDb.create.run({
       id,
+      user_id: user.id, // 关联到当前用户
       title,
       description,
       keywords: JSON.stringify(keywords),
@@ -118,9 +183,14 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// PUT /api/projects?id=...  更新项目（原来在 /api/projects/[id]）
+// PUT /api/projects?id=...  更新项目
 export async function PUT(request: NextRequest) {
   try {
+    const user = getCurrentUser(request);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
+    }
+
     const url = new URL(request.url);
     const id = url.searchParams.get('id');
     if (!id) {
@@ -132,36 +202,29 @@ export async function PUT(request: NextRequest) {
 
     const existing = projectDb.getById.get({ id }) as Project | undefined;
     if (!existing) {
-      return NextResponse.json(
-        { success: false, error: 'Project not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
+    }
+
+    // 检查权限
+    if (user.role !== 'admin' && existing.user_id !== user.id) {
+      return NextResponse.json({ success: false, error: 'Permission denied' }, { status: 403 });
     }
 
     // 验证并清理 title
     if (title !== undefined) {
       if (typeof title !== 'string') {
-        return NextResponse.json(
-          { success: false, error: 'Title must be a string' },
-          { status: 400 }
-        );
+        return NextResponse.json({ success: false, error: 'Title must be a string' }, { status: 400 });
       }
       title = title.trim().slice(0, 500);
       if (title.length < 2) {
-        return NextResponse.json(
-          { success: false, error: 'Title must be at least 2 characters' },
-          { status: 400 }
-        );
+        return NextResponse.json({ success: false, error: 'Title must be at least 2 characters' }, { status: 400 });
       }
     }
 
     // 验证并清理 description
     if (description !== undefined) {
       if (description && typeof description !== 'string') {
-        return NextResponse.json(
-          { success: false, error: 'Description must be a string' },
-          { status: 400 }
-        );
+        return NextResponse.json({ success: false, error: 'Description must be a string' }, { status: 400 });
       }
       description = (description || '').trim().slice(0, 2000);
     }
@@ -178,10 +241,7 @@ export async function PUT(request: NextRequest) {
     // 验证并清理 keywords
     if (keywords !== undefined) {
       if (!Array.isArray(keywords)) {
-        return NextResponse.json(
-          { success: false, error: 'Keywords must be an array' },
-          { status: 400 }
-        );
+        return NextResponse.json({ success: false, error: 'Keywords must be an array' }, { status: 400 });
       }
       keywords = keywords.filter(k => typeof k === 'string').slice(0, 20);
     }
@@ -199,16 +259,18 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ success: true, data: updated });
   } catch (error) {
     console.error('Error updating project:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to update project' },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: 'Failed to update project' }, { status: 500 });
   }
 }
 
 // DELETE /api/projects?id=...
 export async function DELETE(request: NextRequest) {
   try {
+    const user = getCurrentUser(request);
+    if (!user) {
+      return NextResponse.json({ success: false, error: 'Not authenticated' }, { status: 401 });
+    }
+
     const url = new URL(request.url);
     const id = url.searchParams.get('id');
     if (!id) {
@@ -217,10 +279,12 @@ export async function DELETE(request: NextRequest) {
 
     const existing = projectDb.getById.get({ id }) as Project | undefined;
     if (!existing) {
-      return NextResponse.json(
-        { success: false, error: 'Project not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ success: false, error: 'Project not found' }, { status: 404 });
+    }
+
+    // 检查权限
+    if (user.role !== 'admin' && existing.user_id !== user.id) {
+      return NextResponse.json({ success: false, error: 'Permission denied' }, { status: 403 });
     }
 
     // 删除关联数据（通过级联删除）
@@ -229,9 +293,6 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error deleting project:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to delete project' },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: 'Failed to delete project' }, { status: 500 });
   }
 }
