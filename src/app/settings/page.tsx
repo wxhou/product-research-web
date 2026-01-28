@@ -71,8 +71,10 @@ interface DataSource {
   id: string;
   name: string;
   type: string;
+  description: string;
   config: string;
   is_active: number;
+  is_free: number;
 }
 
 interface DataSourceForm {
@@ -98,6 +100,28 @@ export default function SettingsPage() {
     apiKey?: string;
     temperature: number;
   } | null>(null);
+  // Crawl4AI 配置状态
+  const [crawl4aiConfig, setCrawl4aiConfig] = useState<{
+    url: string;
+    enabled: boolean;
+  } | null>(null);
+  const [crawl4aiSaving, setCrawl4aiSaving] = useState(false);
+  const [crawl4aiMessage, setCrawl4aiMessage] = useState<string | null>(null);
+
+  // 多模型配置
+  const [modelRoles, setModelRoles] = useState<{
+    analyzer: string;
+    extractor: string;
+    reporter: string;
+  } | null>(null);
+  // 每个模型的详细配置（API Key 等）
+  const [modelConfigs, setModelConfigs] = useState<{
+    [role: string]: { apiKey?: string; baseUrl?: string; enabled: boolean };
+  }>({});
+  const [expandedModel, setExpandedModel] = useState<string | null>(null);
+  const [modelRolesSaving, setModelRolesSaving] = useState(false);
+  const [modelRolesMessage, setModelRolesMessage] = useState<string | null>(null);
+
   const router = useRouter();
   const { isAdmin, isAuthenticated, loading: authLoading } = useAuth();
 
@@ -113,8 +137,135 @@ export default function SettingsPage() {
     if (isAuthenticated) {
       fetchDataSources();
       fetchLLMConfig();
+      fetchCrawl4AIConfig();
+      fetchModelRoles();
     }
   }, [isAuthenticated]);
+
+  // 加载 Crawl4AI 配置
+  const fetchCrawl4AIConfig = async () => {
+    try {
+      const res = await fetch('/api/settings/crawl4ai');
+      const data = await res.json();
+      if (data.success && data.data) {
+        setCrawl4aiConfig(data.data);
+      } else {
+        // 默认值
+        setCrawl4aiConfig({ url: 'http://localhost:11235', enabled: false });
+      }
+    } catch (e) {
+      console.error('Failed to load Crawl4AI config:', e);
+      setCrawl4aiConfig({ url: 'http://localhost:11235', enabled: false });
+    }
+  };
+
+  // 保存 Crawl4AI 配置
+  const saveCrawl4AIConfig = async () => {
+    if (!crawl4aiConfig) return;
+    setCrawl4aiSaving(true);
+    setCrawl4aiMessage(null);
+    try {
+      const res = await fetch('/api/settings/crawl4ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(crawl4aiConfig),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setCrawl4aiMessage('配置已保存');
+        setTimeout(() => setCrawl4aiMessage(null), 2000);
+      } else {
+        setCrawl4aiMessage('保存失败: ' + data.error);
+      }
+    } catch (e) {
+      setCrawl4aiMessage('保存失败，请检查网络连接');
+    } finally {
+      setCrawl4aiSaving(false);
+    }
+  };
+
+  // 加载多模型配置
+  const fetchModelRoles = async () => {
+    try {
+      const res = await fetch('/api/settings/model-roles');
+      const data = await res.json();
+      if (data.success && data.data) {
+        const config = data.data;
+        // 设置模型角色选择
+        setModelRoles({
+          analyzer: config.analyzer?.model || '',
+          extractor: config.extractor?.model || '',
+          reporter: config.reporter?.model || '',
+        });
+        // 设置每个模型的详细配置
+        setModelConfigs({
+          analyzer: {
+            model: config.analyzer?.model || '',
+            baseUrl: config.analyzer?.baseUrl || '',
+            apiKey: config.analyzer?.apiKey || '',
+            enabled: config.analyzer?.enabled || false,
+          },
+          extractor: {
+            model: config.extractor?.model || '',
+            baseUrl: config.extractor?.baseUrl || '',
+            apiKey: config.extractor?.apiKey || '',
+            enabled: config.extractor?.enabled || false,
+          },
+          reporter: {
+            model: config.reporter?.model || '',
+            baseUrl: config.reporter?.baseUrl || '',
+            apiKey: config.reporter?.apiKey || '',
+            enabled: config.reporter?.enabled || false,
+          },
+        });
+      }
+    } catch (e) {
+      console.error('Failed to load model roles config:', e);
+    }
+  };
+
+  // 保存多模型配置
+  const saveModelRoles = async () => {
+    setModelRolesSaving(true);
+    setModelRolesMessage(null);
+    try {
+      const config = {
+        analyzer: modelConfigs.analyzer || { model: '', enabled: false },
+        extractor: modelConfigs.extractor || { model: '', enabled: false },
+        reporter: modelConfigs.reporter || { model: '', enabled: false },
+      };
+      // 确保每个配置都有 model 字段
+      if (modelRoles?.analyzer) {
+        config.analyzer.model = modelRoles.analyzer;
+        config.analyzer.enabled = !!modelRoles.analyzer;
+      }
+      if (modelRoles?.extractor) {
+        config.extractor.model = modelRoles.extractor;
+        config.extractor.enabled = !!modelRoles.extractor;
+      }
+      if (modelRoles?.reporter) {
+        config.reporter.model = modelRoles.reporter;
+        config.reporter.enabled = !!modelRoles.reporter;
+      }
+
+      const res = await fetch('/api/settings/model-roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setModelRolesMessage('配置已保存');
+        setTimeout(() => setModelRolesMessage(null), 2000);
+      } else {
+        setModelRolesMessage('保存失败: ' + data.error);
+      }
+    } catch (e) {
+      setModelRolesMessage('保存失败，请检查网络连接');
+    } finally {
+      setModelRolesSaving(false);
+    }
+  };
 
   const fetchDataSources = async () => {
     try {
@@ -124,20 +275,6 @@ export default function SettingsPage() {
       }
       const data = await res.json();
       if (data.success) {
-        const descriptions: Record<string, string> = {
-          'rss-hackernews': '技术社区新闻聚合',
-          'rss-techcrunch': '科技新闻报道',
-          'rss-theverge': '科技和娱乐新闻',
-          'rss-wired': '深度科技报道',
-          'rss-producthunt': '新产品发布平台',
-          'duckduckgo': '免费搜索引擎',
-          'github': '开源项目搜索',
-          'bing': '微软搜索（需 API Key）',
-          'newsapi': '新闻聚合服务（需 API Key）',
-          'gnews': '全球新闻服务（需 API Key）',
-        };
-        const freeSources = ['rss-hackernews', 'rss-techcrunch', 'rss-theverge', 'rss-wired', 'rss-producthunt', 'duckduckgo', 'github'];
-
         setDataSources(
           data.data.map((ds: DataSource) => ({
             id: ds.id,
@@ -145,8 +282,8 @@ export default function SettingsPage() {
             type: ds.type,
             enabled: ds.is_active === 1,
             apiKey: '',
-            description: descriptions[ds.id] || '',
-            free: freeSources.includes(ds.id),
+            description: ds.description || '',
+            free: ds.is_free === 1,
           }))
         );
       }
@@ -203,7 +340,7 @@ export default function SettingsPage() {
           id: source.id,
           name: source.name,
           is_active: source.enabled,
-          config: { apiKey: source.apiKey || 'demo-key' },
+          config: source.apiKey ? { apiKey: source.apiKey } : null,
         }),
       });
       const data = await res.json();
@@ -295,7 +432,17 @@ export default function SettingsPage() {
                   <div className="source-title">
                     <div className="source-name">
                       <h3>{source.name}</h3>
-                      {source.free && <span className="free-badge">免费</span>}
+                      {source.free ? (
+                        <span className="free-badge">免费</span>
+                      ) : (
+                        <span className="api-key-badge">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2" />
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                          </svg>
+                          需要 API Key
+                        </span>
+                      )}
                     </div>
                     <p className="source-desc">{source.description}</p>
                   </div>
@@ -351,7 +498,7 @@ export default function SettingsPage() {
             <h2>大模型配置</h2>
             <p>配置用于 AI 分析和报告生成的大模型 API</p>
           </div>
-          {llmConfig?.apiKey && (
+          {llmConfig?.modelName && (
             <div className="current-model-badge">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="3" />
@@ -567,12 +714,27 @@ export default function SettingsPage() {
 
                   // 更新当前使用模型的显示
                   const currentModelBadge = document.querySelector('.current-model-badge');
-                  if (config.apiKey && config.modelName) {
+                  if (config.modelName) {
                     if (currentModelBadge) {
                       const modelSpan = currentModelBadge.querySelector('span');
                       if (modelSpan) {
-                        const tempStr = config.temperature !== 0.7 ? ' (temp: ' + config.temperature + ')' : '';
-                        modelSpan.innerHTML = 'Current: <strong>' + config.modelName + '</strong>' + tempStr;
+                        const tempStr = config.temperature && config.temperature !== 0.7 ? ' (温度: ' + config.temperature + ')' : '';
+                        modelSpan.innerHTML = '当前使用: <strong>' + config.modelName + '</strong>' + tempStr;
+                      }
+                    } else {
+                      // 动态创建 badge
+                      const sectionHeader = document.querySelector('.section-header');
+                      if (sectionHeader) {
+                        const badge = document.createElement('div');
+                        badge.className = 'current-model-badge';
+                        badge.innerHTML = \`
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3" />
+                            <path d="M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6M4.22 19.78l4.24-4.24M15.54 8.46l4.24-4.24" />
+                          </svg>
+                          <span>当前使用: <strong>\${config.modelName}</strong></span>
+                        \`;
+                        sectionHeader.appendChild(badge);
                       }
                     }
                   }
@@ -603,15 +765,6 @@ export default function SettingsPage() {
                 if (data.success) {
                   // 重新加载配置并更新页面显示
                   await loadConfig();
-                  // 更新当前使用模型的显示
-                  const currentModelBadge = document.querySelector('.current-model-badge');
-                  if (currentModelBadge && data.data && data.data.modelName) {
-                    const modelSpan = currentModelBadge.querySelector('span');
-                    if (modelSpan) {
-                      const tempStr = data.data.temperature !== 0.7 ? ' (temp: ' + data.data.temperature + ')' : '';
-                      modelSpan.innerHTML = 'Current: <strong>' + data.data.modelName + '</strong>' + tempStr;
-                    }
-                  }
                   alert('保存成功');
                 } else {
                   alert('保存失败: ' + data.error);
@@ -623,12 +776,51 @@ export default function SettingsPage() {
 
             saveBtn.addEventListener('click', saveConfig);
 
+            // 加载配置
+            function loadConfig() {
+              // 从 localStorage 读取已保存的配置
+              const savedConfig = localStorage.getItem('llm_config');
+              if (savedConfig) {
+                try {
+                  const config = JSON.parse(savedConfig);
+                  document.getElementById('base-url').value = config.baseUrl || '';
+                  document.getElementById('api-key').value = config.apiKey || '';
+                  // 填充额外的模型配置
+                  const modelConfigs = config.modelConfigs || {};
+                  for (const [provider, cfg] of Object.entries(modelConfigs)) {
+                    const baseUrlInput = document.getElementById('base-url-' + provider);
+                    const apiKeyInput = document.getElementById('api-key-' + provider);
+                    if (baseUrlInput) baseUrlInput.value = cfg.baseUrl || '';
+                    if (apiKeyInput) apiKeyInput.value = cfg.apiKey || '';
+                  }
+                } catch (e) {
+                  console.error('Failed to parse saved config:', e);
+                }
+              }
+              // 从 localStorage 读取其他设置
+              const reportLang = localStorage.getItem('report_language');
+              if (reportLang) {
+                const select = document.querySelector('.preference-card .select');
+                if (select) select.value = reportLang;
+              }
+            }
+
+            // 更新 Base URL 输入框可见性
+            function updateBaseUrlVisibility() {
+              const selectedProvider = document.getElementById('provider-select')?.value;
+              const baseUrlGroup = document.getElementById('base-url-group');
+              if (baseUrlGroup) {
+                baseUrlGroup.style.display = selectedProvider === 'custom' ? 'block' : 'none';
+              }
+            }
+
             // 初始化
             loadConfig();
             updateBaseUrlVisibility();
           })();
-        `
-      }} />
+          `
+        }}
+      />
 
 
       <section className="settings-section">
@@ -653,8 +845,258 @@ export default function SettingsPage() {
               <option value="en">English</option>
             </select>
           </div>
+
+          <div className="preference-item">
+            <div className="preference-info">
+              <div className="preference-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
+                  <path d="M12 16v-4M12 8h.01" />
+                </svg>
+              </div>
+              <div>
+                <h3>Crawl4AI 全文爬虫</h3>
+                <p>开源网页爬虫，用于获取完整页面内容（需本地部署）</p>
+              </div>
+            </div>
+            <div className="crawl4ai-config" style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '280px' }}>
+              <div className="crawl4ai-url-row" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="http://localhost:11235"
+                  value={crawl4aiConfig?.url || ''}
+                  onChange={(e) => setCrawl4aiConfig({ ...crawl4aiConfig!, url: e.target.value })}
+                  onBlur={saveCrawl4AIConfig}
+                  style={{ flex: 1, minWidth: '200px' }}
+                  disabled={!crawl4aiConfig}
+                />
+                <label className="toggle" style={{ marginLeft: '12px' }}>
+                  <input
+                    type="checkbox"
+                    checked={crawl4aiConfig?.enabled || false}
+                    onChange={(e) => {
+                      setCrawl4aiConfig({ ...crawl4aiConfig!, enabled: e.target.checked });
+                      saveCrawl4AIConfig();
+                    }}
+                  />
+                  <span className="toggle-slider"></span>
+                </label>
+              </div>
+              <p className="config-hint" style={{ fontSize: '13px', color: crawl4aiMessage?.includes('成功') ? 'var(--success)' : 'var(--foreground-muted)', margin: 0 }}>
+                {crawl4aiMessage || (
+                  <>
+                    <a href="https://github.com/unclecode/crawl4ai" target="_blank" rel="noopener noreferrer">
+                      安装指南
+                    </a>
+                    &nbsp;· Docker: <code style={{ background: 'var(--background-subtle)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>docker run -p 11235:11235 unclecode/crawl4ai</code>
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
         </div>
       </section>
+
+      {/* 多模型配置区域 */}
+      <section className="settings-section">
+        <div className="section-header">
+          <div className="section-info">
+            <h2>AI 模型配置</h2>
+            <p>为不同任务配置专用模型，提升调研效率和质量</p>
+          </div>
+          <p style={{ fontSize: '13px', color: 'var(--foreground-muted)', margin: 0 }}>
+            支持配置独立的 API 地址和 Key
+          </p>
+        </div>
+
+        <div className="preference-card card">
+          {/* 快速分析模型 */}
+          <ModelRoleConfig
+            role="analyzer"
+            title="快速分析模型"
+            description="用于判断内容质量、决定是否需要爬取（建议用小模型，省成本）"
+            icon={
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              </svg>
+            }
+            color="var(--success)"
+            selectedModel={modelRoles?.analyzer || ''}
+            onModelChange={(model) => setModelRoles({ ...modelRoles!, analyzer: model })}
+            config={modelConfigs.analyzer || { enabled: false }}
+            onConfigChange={(config) => setModelConfigs({ ...modelConfigs, analyzer: config })}
+            isExpanded={expandedModel === 'analyzer'}
+            onToggleExpand={() => setExpandedModel(expandedModel === 'analyzer' ? null : 'analyzer')}
+            onSave={saveModelRoles}
+          />
+
+          {/* 深度提取模型 */}
+          <ModelRoleConfig
+            role="extractor"
+            title="深度提取模型"
+            description="用于从搜索结果中提取功能、竞品、市场等信息（建议用大模型）"
+            icon={
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8" />
+                <path d="M21 21l-4.35-4.35" />
+                <path d="M11 8v6M8 11h6" />
+              </svg>
+            }
+            color="var(--accent)"
+            selectedModel={modelRoles?.extractor || ''}
+            onModelChange={(model) => setModelRoles({ ...modelRoles!, extractor: model })}
+            config={modelConfigs.extractor || { enabled: false }}
+            onConfigChange={(config) => setModelConfigs({ ...modelConfigs, extractor: config })}
+            isExpanded={expandedModel === 'extractor'}
+            onToggleExpand={() => setExpandedModel(expandedModel === 'extractor' ? null : 'extractor')}
+            onSave={saveModelRoles}
+          />
+
+          {/* 报告生成模型 */}
+          <ModelRoleConfig
+            role="reporter"
+            title="报告生成模型"
+            description="用于生成最终的研究报告（建议用推理模型）"
+            icon={
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+                <line x1="16" y1="13" x2="8" y2="13" />
+                <line x1="16" y1="17" x2="8" y2="17" />
+                <polyline points="10 9 9 9 8 9" />
+              </svg>
+            }
+            color="var(--primary)"
+            selectedModel={modelRoles?.reporter || ''}
+            onModelChange={(model) => setModelRoles({ ...modelRoles!, reporter: model })}
+            config={modelConfigs.reporter || { enabled: false }}
+            onConfigChange={(config) => setModelConfigs({ ...modelConfigs, reporter: config })}
+            isExpanded={expandedModel === 'reporter'}
+            onToggleExpand={() => setExpandedModel(expandedModel === 'reporter' ? null : 'reporter')}
+            onSave={saveModelRoles}
+          />
+
+          {/* 状态提示 */}
+          <p style={{ fontSize: '13px', color: modelRolesMessage?.includes('成功') ? 'var(--success)' : 'var(--foreground-muted)', margin: 0, marginTop: '8px' }}>
+            {modelRolesMessage || '修改后自动保存'}
+          </p>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// 模型角色配置组件
+function ModelRoleConfig({
+  role,
+  title,
+  description,
+  icon,
+  color,
+  selectedModel,
+  onModelChange,
+  config,
+  onConfigChange,
+  isExpanded,
+  onToggleExpand,
+  onSave,
+}: {
+  role: string;
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  color: string;
+  selectedModel: string;
+  onModelChange: (model: string) => void;
+  config: { apiKey?: string; baseUrl?: string; enabled: boolean };
+  onConfigChange: (config: { apiKey?: string; baseUrl?: string; enabled: boolean }) => void;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className="model-role-config" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '16px', marginBottom: '16px' }}>
+      <div className="preference-item" onClick={onToggleExpand} style={{ cursor: 'pointer' }}>
+        <div className="preference-info">
+          <div className="preference-icon" style={{ color }}>
+            {icon}
+          </div>
+          <div>
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {title}
+              {selectedModel && <span className="model-badge">{selectedModel.split('/').pop()}</span>}
+            </h3>
+            <p>{description}</p>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {isExpanded ? (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="18 15 12 9 6 15" />
+            </svg>
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          )}
+        </div>
+      </div>
+
+      {isExpanded && (
+        <div className="model-config-panel" style={{ marginTop: '16px', marginLeft: '44px', padding: '16px', background: 'var(--background-subtle)', borderRadius: '8px' }}>
+          {/* 模型选择 */}
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: 'var(--foreground-muted)' }}>
+              模型名称
+            </label>
+            <input
+              type="text"
+              className="input"
+              placeholder="例如: deepseek-ai/DeepSeek-R1 或 gpt-4o"
+              value={selectedModel}
+              onChange={(e) => onModelChange(e.target.value)}
+              style={{ width: '100%' }}
+            />
+            <p style={{ fontSize: '12px', color: 'var(--foreground-muted)', marginTop: '6px', margin: 0 }}>
+              常用模型: DeepSeek-R1, DeepSeek-V3, Qwen2.5-72B-Instruct, QwQ-32B
+            </p>
+          </div>
+
+          {/* API 地址 */}
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: 'var(--foreground-muted)' }}>
+              API 地址（可选，使用主模型配置可留空）
+            </label>
+            <input
+              type="text"
+              className="input"
+              placeholder="https://api.example.com/v1"
+              value={config.baseUrl || ''}
+              onChange={(e) => onConfigChange({ ...config, baseUrl: e.target.value })}
+            />
+          </div>
+
+          {/* API Key */}
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: 'var(--foreground-muted)' }}>
+              API Key（可选，使用主模型配置可留空）
+            </label>
+            <input
+              type="password"
+              className="input"
+              placeholder="sk-..."
+              value={config.apiKey || ''}
+              onChange={(e) => onConfigChange({ ...config, apiKey: e.target.value })}
+            />
+          </div>
+
+          {/* 保存按钮 */}
+          <button className="btn btn-primary" onClick={onSave}>
+            保存配置
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -103,8 +103,10 @@ function initDatabase() {
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         type TEXT NOT NULL,
+        description TEXT,
         config TEXT NOT NULL,
         is_active INTEGER DEFAULT 1,
+        is_free INTEGER DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
@@ -243,6 +245,59 @@ function initDatabase() {
       }
     }
 
+    // 迁移：为 data_sources 表添加 description 和 is_free 字段
+    const checkDataSourceColumn = (column: string) => {
+      try {
+        db.prepare(`SELECT ${column} FROM data_sources LIMIT 1`).get();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    if (!checkDataSourceColumn('description')) {
+      try {
+        db.exec(`ALTER TABLE data_sources ADD COLUMN description TEXT`);
+      } catch (e) {
+        // 忽略错误
+      }
+    }
+
+    if (!checkDataSourceColumn('is_free')) {
+      try {
+        db.exec(`ALTER TABLE data_sources ADD COLUMN is_free INTEGER DEFAULT 1`);
+      } catch (e) {
+        // 忽略错误
+      }
+    }
+
+    // 创建 research_phases 表（如果不存在）- 存储调研各阶段状态
+    const hasResearchPhases = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='research_phases'").get();
+    if (!hasResearchPhases) {
+      try {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS research_phases (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            progress INTEGER DEFAULT 0,
+            message TEXT,
+            data TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            UNIQUE(project_id, phase)
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_research_phases_project ON research_phases(project_id);
+          CREATE INDEX IF NOT EXISTS idx_research_phases_phase ON research_phases(phase);
+        `);
+      } catch (e) {
+        console.error('Failed to create research_phases table:', e);
+      }
+    }
+
     // 检查是否需要创建 default 用户
     const defaultUser = db.prepare("SELECT id FROM users WHERE username = 'default'").get();
     if (!defaultUser) {
@@ -265,23 +320,31 @@ function initDatabase() {
   // 插入默认数据源
   const defaultSources = [
     // RSS 订阅（免费，无需配置）
-    { id: 'rss-hackernews', name: 'Hacker News', type: 'rss-hackernews', config: '{}' },
-    { id: 'rss-techcrunch', name: 'TechCrunch', type: 'rss-techcrunch', config: '{}' },
-    { id: 'rss-theverge', name: 'The Verge', type: 'rss-theverge', config: '{}' },
-    { id: 'rss-wired', name: 'Wired', type: 'rss-wired', config: '{}' },
-    { id: 'rss-producthunt', name: 'Product Hunt', type: 'rss-producthunt', config: '{}' },
+    { id: 'rss-hackernews', name: 'Hacker News', type: 'rss-hackernews', description: '技术社区新闻聚合', config: '{}', is_free: 1 },
+    { id: 'rss-techcrunch', name: 'TechCrunch', type: 'rss-techcrunch', description: '科技新闻报道', config: '{}', is_free: 1 },
+    { id: 'rss-theverge', name: 'The Verge', type: 'rss-theverge', description: '科技和娱乐新闻', config: '{}', is_free: 1 },
+    { id: 'rss-wired', name: 'Wired', type: 'rss-wired', description: '深度科技报道', config: '{}', is_free: 1 },
+    { id: 'rss-producthunt', name: 'Product Hunt', type: 'rss-producthunt', description: '新产品发布平台', config: '{}', is_free: 1 },
+    { id: 'rss-cnblogs', name: '博客园', type: 'rss-cnblogs', description: '国内开发者社区', config: '{}', is_free: 1 },
     // 免费搜索
-    { id: 'duckduckgo', name: 'DuckDuckGo', type: 'duckduckgo', config: '{}' },
-    { id: 'bing', name: 'Bing Search', type: 'bing', config: '{}' },
+    { id: 'duckduckgo', name: 'DuckDuckGo', type: 'duckduckgo', description: '免费搜索引擎', config: '{}', is_free: 1 },
+    { id: 'bing', name: 'Bing Search', type: 'bing', description: '微软搜索（需 API Key）', config: '{}', is_free: 0 },
     // 需要 API Key（可选）
-    { id: 'newsapi', name: 'NewsAPI', type: 'newsapi', config: '{}' },
-    { id: 'gnews', name: 'GNews', type: 'gnews', config: '{}' },
+    { id: 'newsapi', name: 'NewsAPI', type: 'newsapi', description: '新闻聚合服务（需 API Key）', config: '{}', is_free: 0 },
+    { id: 'gnews', name: 'GNews', type: 'gnews', description: '全球新闻服务（需 API Key）', config: '{}', is_free: 0 },
     // GitHub（免费）
-    { id: 'github', name: 'GitHub', type: 'github', config: '{}' },
+    { id: 'github', name: 'GitHub', type: 'github', description: '开源项目搜索', config: '{}', is_free: 1 },
+    // 国际技术社区（免费）
+    { id: 'devto', name: 'Dev.to', type: 'devto', description: '技术文章社区（英文）', config: '{}', is_free: 1 },
+    { id: 'reddit', name: 'Reddit', type: 'reddit', description: '技术社区讨论（英文）', config: '{}', is_free: 1 },
+    { id: 'hackernews-api', name: 'Hacker News API', type: 'hackernews-api', description: '官方 API 搜索（英文）', config: '{}', is_free: 1 },
+    // 国内技术社区（免费）
+    { id: 'v2ex', name: 'V2EX', type: 'v2ex', description: '国内程序员社区（中文）', config: '{}', is_free: 1 },
   ];
 
   const insertSource = db.prepare(`
-    INSERT OR IGNORE INTO data_sources (id, name, type, config) VALUES (@id, @name, @type, @config)
+    INSERT OR IGNORE INTO data_sources (id, name, type, description, config, is_free)
+    VALUES (@id, @name, @type, @description, @config, @is_free)
   `);
 
   for (const source of defaultSources) {
@@ -461,6 +524,34 @@ export const taskDb = {
   `),
 
   deleteByProject: db.prepare(`DELETE FROM research_tasks WHERE project_id = @project_id`),
+};
+
+// 调研阶段相关操作
+export const researchPhaseDb = {
+  create: db.prepare(`
+    INSERT INTO research_phases (id, project_id, phase, status, progress, message, data)
+    VALUES (@id, @project_id, @phase, @status, @progress, @message, @data)
+  `),
+
+  getByProject: db.prepare(`
+    SELECT * FROM research_phases WHERE project_id = @project_id ORDER BY created_at ASC
+  `),
+
+  getByProjectAndPhase: db.prepare(`
+    SELECT * FROM research_phases WHERE project_id = @project_id AND phase = @phase
+  `),
+
+  update: db.prepare(`
+    UPDATE research_phases SET
+      status = @status,
+      progress = @progress,
+      message = @message,
+      data = @data,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id
+  `),
+
+  deleteByProject: db.prepare(`DELETE FROM research_phases WHERE project_id = @project_id`),
 };
 
 // 搜索结果相关操作

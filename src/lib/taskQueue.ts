@@ -1,8 +1,6 @@
-import db, { taskDb, projectDb, searchResultDb, reportDb } from './db';
-import { getDataSourceManager, type SearchResult } from './datasources';
-import { analyzeSearchResults, generateFullReport } from './analysis';
-import { generateText, getLLMConfig, PRODUCT_ANALYST_PROMPT } from './llm';
-import crypto from 'crypto';
+import db, { taskDb, projectDb, searchResultDb, reportDb, researchPhaseDb } from './db';
+import { type SearchResult } from './datasources';
+import { runResearchAgent } from './research-agent';
 
 export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
@@ -15,12 +13,108 @@ export interface Task {
   error?: string;
   created_at: string;
   started_at?: string;
-  completed_at?: string;
+  completed_at: string;
 }
 
 export interface ProjectProgress {
   progress: number;
   message: string;
+}
+
+// ==================== 日志存储 ====================
+
+interface LogEntry {
+  timestamp: string;
+  level: 'info' | 'warn' | 'error';
+  tag: string;
+  message: string;
+  projectId?: string;
+}
+
+// 内存日志缓冲区（按项目ID存储）
+const projectLogs: Map<string, LogEntry[]> = new Map();
+const MAX_LOGS_PER_PROJECT = 100;
+
+// 过滤敏感信息的函数
+function sanitizeLogMessage(message: string): string {
+  return message
+    // 隐藏 API Key (sk- 开头的密钥)
+    .replace(/sk-[a-zA-Z0-9]{20,}/g, 'sk-***')
+    // 隐藏 ModelScope API Key (ms- 开头的密钥)
+    .replace(/ms-[a-zA-Z0-9-]{20,}/g, 'ms-***')
+    // 隐藏 URL 中的敏感参数
+    .replace(/([?&])api[_-]?key=([^&]*)/gi, '$1api_key=***')
+    .replace(/([?&])key=([^&]*)/gi, '$1key=***')
+    .replace(/([?&])token=([^&]*)/gi, '$1token=***')
+    // 隐藏完整 URL（只保留域名）
+    .replace(/https?:\/\/[^\/]+/g, (match) => {
+      try {
+        const url = new URL(match);
+        return url.hostname;
+      } catch {
+        return match;
+      }
+    });
+}
+
+// 记录日志
+export function addLog(projectId: string, tag: string, message: string, level: 'info' | 'warn' | 'error' = 'info') {
+  const sanitizedMessage = sanitizeLogMessage(message);
+
+  if (!projectLogs.has(projectId)) {
+    projectLogs.set(projectId, []);
+  }
+
+  const logs = projectLogs.get(projectId)!;
+  logs.push({
+    timestamp: new Date().toISOString(),
+    level,
+    tag,
+    message: sanitizedMessage,
+    projectId,
+  });
+
+  // 保留最近的日志
+  if (logs.length > MAX_LOGS_PER_PROJECT) {
+    logs.shift();
+  }
+}
+
+// 获取项目的日志
+export function getProjectLogs(projectId: string, limit = 50): LogEntry[] {
+  const logs = projectLogs.get(projectId) || [];
+  return logs.slice(-limit);
+}
+
+// 清除项目的日志
+export function clearProjectLogs(projectId: string) {
+  projectLogs.delete(projectId);
+}
+
+// 获取所有活跃项目的日志数量（用于监控）
+export function getActiveLogCount(): number {
+  return projectLogs.size;
+}
+
+// 调研阶段定义
+export type ResearchPhase =
+  | 'data_collection'
+  | 'summarization'
+  | 'deep_analysis'
+  | 'report_generation'
+  | 'completed';
+
+// 阶段状态
+export interface ResearchPhaseState {
+  id: string;
+  project_id: string;
+  phase: ResearchPhase;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  progress: number;
+  message: string;
+  data: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // Project type for generateFullReport function
@@ -53,102 +147,46 @@ export function updateProgress(projectId: string, progress: number, message: str
   projectDb.updateProgress.run({ id: projectId, progress, progress_message: message });
 }
 
-// 使用大模型分析搜索结果
-async function analyzeWithLLM(results: SearchResult[], projectTitle: string) {
-  const config = getLLMConfig();
+// 更新阶段状态
+function updatePhaseState(projectId: string, phase: ResearchPhase, status: 'pending' | 'processing' | 'completed' | 'failed', progress: number, message: string, data: object = {}) {
+  const existing = researchPhaseDb.getByProjectAndPhase.get({ project_id: projectId, phase }) as ResearchPhaseState | undefined;
 
-  if (!config.apiKey) {
-    console.log('No LLM API key configured, using rule-based analysis');
-    return {
-      features: [],
-      competitors: [],
-      swot: { strengths: [], weaknesses: [], opportunities: [], threats: [] },
-      opportunities: [],
-      techRoadmap: [],
-      marketData: { marketSize: '数十亿级', growthRate: '15-20%', keyPlayers: [], trends: [] },
-    };
-  }
-
-  const summary = results.slice(0, 10).map(r => ({
-    title: r.title,
-    content: r.content.substring(0, 500),
-  }));
-
-  const prompt = `请分析以下产品调研资料，总结关键功能特性、竞争对手、SWOT分析和市场机会。
-
-产品主题：${projectTitle}
-
-资料内容：
-${JSON.stringify(summary, null, 2)}
-
-请提供JSON格式的分析结果，包含：
-1. 关键功能特性列表
-2. 主要竞争对手及其特点
-3. SWOT分析
-4. 市场机会点
-5. 技术发展路线建议
-6. 市场规模和增长趋势数据`;
-
-  try {
-    const result = await generateText(prompt, PRODUCT_ANALYST_PROMPT, {
-      temperature: 0.3,
-      maxTokens: 4000,
+  if (existing) {
+    researchPhaseDb.update.run({
+      id: existing.id,
+      project_id: projectId,
+      phase,
+      status,
+      progress,
+      message,
+      data: JSON.stringify(data),
     });
-
-    const jsonMatch = result.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-    throw new Error('Failed to parse LLM response');
-  } catch (error) {
-    console.error('LLM analysis failed:', error);
-    return analyzeSearchResults(results, projectTitle);
+  } else {
+    const id = generateId();
+    researchPhaseDb.create.run({
+      id,
+      project_id: projectId,
+      phase,
+      status,
+      progress,
+      message,
+      data: JSON.stringify(data),
+    });
   }
 }
 
-// 生成完整报告
-async function generateReport(project: ProjectForReport, results: SearchResult[]): Promise<{ content: string; used_llm: number }> {
-  const config = getLLMConfig();
-  const hasApiKey = !!config.apiKey;
-
-  const prompt = `请为以下产品调研生成一份详细的产品分析报告。
-
-产品主题：${project.title}
-
-调研结果数量：${results.length} 条
-
-${hasApiKey ? '基于AI智能分析的结果，请生成一份专业的产品功能推荐和机会分析报告。' : '请根据收集到的资料，生成一份详细的产品功能分析和竞品对比报告。'}
-
-报告要求包含以下内容：
-
-1. 产品概述
-2. 核心功能分析（列出主要功能点及其实现方式）
-3. 竞品对比分析（至少对比3个竞品）
-4. SWOT分析
-5. 市场机会洞察
-6. 技术发展路线建议
-
-请使用 Markdown 格式，包含：
-- 至少2个 Mermaid 图表（功能频率图、技术路线图）
-- 完整的表格
-- 清晰的层级结构
-
-报告内容要详细、专业，字数不少于2000字。`;
-
-  try {
-    const report = await generateText(prompt, PRODUCT_ANALYST_PROMPT, {
-      temperature: 0.7,
-      maxTokens: 8000,
-    });
-    return { content: report, used_llm: hasApiKey ? 1 : 0 };
-  } catch (error) {
-    console.error('LLM report generation failed:', error);
-    const analysis = analyzeSearchResults(results, project.title);
-    return { content: generateFullReport(project, results, analysis), used_llm: 0 };
-  }
+// 获取阶段状态
+export function getPhaseState(projectId: string, phase: ResearchPhase): ResearchPhaseState | null {
+  return researchPhaseDb.getByProjectAndPhase.get({ project_id: projectId, phase }) as ResearchPhaseState | null;
 }
 
-// 执行单个调研任务
+// 获取所有阶段状态
+export function getAllPhaseStates(projectId: string): ResearchPhaseState[] {
+  return researchPhaseDb.getByProject.all({ project_id: projectId }) as ResearchPhaseState[];
+}
+
+// ==================== 主处理流程 (使用 LangGraph 风格的 Research Agent) ====================
+
 export async function processTask(taskId: string): Promise<boolean> {
   const task = taskDb.getById.get({ id: taskId }) as Task | undefined;
   if (!task) {
@@ -167,109 +205,37 @@ export async function processTask(taskId: string): Promise<boolean> {
     // 标记任务开始
     taskDb.markProcessing.run({ id: taskId });
     projectDb.updateStatus.run({ id: task.project_id, status: 'processing' });
-    updateProgress(task.project_id, 5, '正在初始化调研任务...');
+    updateProgress(task.project_id, 0, '正在初始化调研任务...');
 
-    // 清理旧的搜索结果和报告（如果有）
+    // 清理旧的搜索结果和报告
     searchResultDb.deleteByProject.run({ project_id: task.project_id });
     reportDb.deleteByProject.run({ project_id: task.project_id });
+    researchPhaseDb.deleteByProject.run({ project_id: task.project_id });
 
-    const sourceManager = getDataSourceManager();
-    const enabledSources = sourceManager.getEnabledSources();
-    const allResults: SearchResult[] = [];
+    // 使用 Research Agent 执行完整的研究工作流 (LangGraph 风格)
+    const result = await runResearchAgent(
+      task.project_id,
+      task.user_id,
+      project.title,
+      project.description || '',
+      2  // maxIterations
+    );
 
-    // 第一轮：使用项目标题进行主题搜索
-    updateProgress(task.project_id, 10, `正在搜索 "${project.title}" 相关资料...`);
-
-    const totalSources = enabledSources.length;
-    for (let i = 0; i < enabledSources.length; i++) {
-      const source = enabledSources[i];
-      updateProgress(
-        task.project_id,
-        10 + Math.floor((i / totalSources) * 30),
-        `正在搜索 ${source}（${i + 1}/${totalSources}）...`
-      );
-
-      try {
-        const results = await sourceManager.search({
-          query: project.title,
-          source,
-          limit: 10,
-        });
-
-        for (const result of results) {
-          const searchId = generateId();
-          searchResultDb.create.run({
-            id: searchId,
-            project_id: task.project_id,
-            user_id: task.user_id,
-            source,
-            query: project.title,
-            url: result.url,
-            title: result.title,
-            content: result.content,
-            raw_data: JSON.stringify(result),
-          });
-          allResults.push(result);
-        }
-      } catch (error) {
-        console.error(`Error searching with ${source}:`, error);
-      }
+    // 保存搜索结果
+    for (const searchResult of result.searchResults) {
+      const searchId = generateId();
+      searchResultDb.create.run({
+        id: searchId,
+        project_id: task.project_id,
+        user_id: task.user_id,
+        source: searchResult.source,
+        query: project.title,
+        url: searchResult.url,
+        title: searchResult.title,
+        content: searchResult.content,
+        raw_data: JSON.stringify(searchResult),
+      });
     }
-
-    // 第二轮：竞品搜索
-    updateProgress(task.project_id, 45, '正在搜索竞品信息...');
-
-    const competitors = ['竞品1', '竞品2', '竞品3'];
-    const competitorResults: SearchResult[] = [];
-
-    for (const competitor of competitors) {
-      updateProgress(
-        task.project_id,
-        45 + Math.floor((competitors.indexOf(competitor) / competitors.length) * 20),
-        `正在搜索 ${competitor}...`
-      );
-
-      try {
-        const results = await sourceManager.search({
-          query: `${project.title} ${competitor}`,
-          source: 'duckduckgo',
-          limit: 5,
-        });
-
-        for (const result of results) {
-          const searchId = generateId();
-          searchResultDb.create.run({
-            id: searchId,
-            project_id: task.project_id,
-            user_id: task.user_id,
-            source: 'competitor',
-            query: competitor,
-            url: result.url,
-            title: result.title,
-            content: result.content,
-            raw_data: JSON.stringify(result),
-          });
-          allResults.push(result);
-          competitorResults.push(result);
-        }
-      } catch (error) {
-        console.error(`Error searching competitor ${competitor}:`, error);
-      }
-    }
-
-    // 分析阶段
-    updateProgress(task.project_id, 70, '正在进行智能分析...');
-    await analyzeWithLLM(allResults, project.title);
-
-    // 生成报告
-    updateProgress(task.project_id, 85, '正在生成调研报告...');
-    const reportResult = await generateReport(project, allResults);
-
-    // 修复 markdown 转义
-    const fixedReport = fixMarkdownEscaping(reportResult.content);
-
-    // 先删除已存在的报告（如果有）
-    reportDb.deleteByProject.run({ project_id: task.project_id });
 
     // 保存报告
     const reportId = generateId();
@@ -278,9 +244,9 @@ export async function processTask(taskId: string): Promise<boolean> {
       project_id: task.project_id,
       user_id: task.user_id,
       title: `${project.title} - 产品调研报告`,
-      content: fixedReport,
+      content: result.report,
       mermaid_charts: '',
-      used_llm: reportResult.used_llm,
+      used_llm: 1,
     });
 
     // 完成任务
@@ -292,11 +258,11 @@ export async function processTask(taskId: string): Promise<boolean> {
       keywords: project.keywords || '',
       status: 'completed',
       progress: 100,
-      progress_message: '调研完成！',
+      progress_message: `调研完成！数据质量评分: ${result.dataQuality.score}/100`,
     });
     updateProgress(task.project_id, 100, '调研完成！');
 
-    console.log(`Research task completed: ${taskId}`);
+    console.log(`Research task completed: ${taskId}, quality score: ${result.dataQuality.score}`);
     return true;
   } catch (error) {
     console.error('Task failed:', error);
@@ -307,6 +273,8 @@ export async function processTask(taskId: string): Promise<boolean> {
     return false;
   }
 }
+
+// ==================== 任务队列管理 ====================
 
 // 获取下一个待处理的任务
 export function getNextTask(): Task | null {
@@ -336,7 +304,7 @@ export function getUserActiveTaskCount(userId: string): number {
 export function createResearchTask(projectId: string, userId: string): Task {
   const taskId = generateId();
 
-  // 如果已存在该项目的任务，先删除（旧任务可能是失败或未完成的）
+  // 如果已存在该项目的任务，先删除
   const existingTask = taskDb.getByProject.get({ project_id: projectId }) as Task | undefined;
   if (existingTask) {
     taskDb.deleteByProject.run({ project_id: projectId });
@@ -356,6 +324,7 @@ export function createResearchTask(projectId: string, userId: string): Task {
     status: 'pending',
     priority: 0,
     created_at: new Date().toISOString(),
+    completed_at: new Date().toISOString(),
   };
 }
 
@@ -364,23 +333,18 @@ export class TaskQueue {
   private isProcessing = false;
   private pollInterval: NodeJS.Timeout | null = null;
 
-  // 启动队列处理器
   start(pollIntervalMs = 5000) {
     if (this.isProcessing) return;
 
     this.isProcessing = true;
     console.log('Task queue started, polling every', pollIntervalMs, 'ms');
 
-    // 立即执行一次
     this.processNext();
-
-    // 设置轮询
     this.pollInterval = setInterval(() => {
       this.processNext();
     }, pollIntervalMs);
   }
 
-  // 停止队列处理器
   stop() {
     if (this.pollInterval) {
       clearInterval(this.pollInterval);
@@ -390,7 +354,6 @@ export class TaskQueue {
     console.log('Task queue stopped');
   }
 
-  // 处理下一个任务
   private async processNext() {
     const task = getNextTask();
     if (!task) return;
@@ -399,11 +362,9 @@ export class TaskQueue {
     await processTask(task.id);
   }
 
-  // 手动触发任务处理
   async trigger() {
     await this.processNext();
   }
 }
 
-// 导出单例任务队列
 export const taskQueue = new TaskQueue();

@@ -194,22 +194,46 @@ export async function callLLM(
     modelName?: string;
     temperature?: number;
     maxTokens?: number;
+    role?: 'analyzer' | 'extractor' | 'reporter'; // 模型角色
   }
 ): Promise<LLMResponse> {
   const config = getLLMConfig();
-  const modelName = options?.modelName || config.modelName || 'gpt-4';
-  const temperature = options?.temperature ?? config.temperature ?? 0.7;
-  const timeout = config.timeout * 1000;
+  const role = options?.role;
 
-  const baseUrl = getBaseUrl(config);
-  const headers = getHeaders(config);
-  const messageFormat = formatMessages(messages, config.provider);
+  // 如果指定了角色，尝试从模型角色配置中获取自定义配置
+  let modelConfig = config;
+  if (role) {
+    try {
+      const { getModelConfig } = await import('@/lib/model-roles');
+      const roleConfig = getModelConfig(role);
+      if (roleConfig && roleConfig.model && roleConfig.model.trim() !== '') {
+        // 使用角色自定义配置
+        modelConfig = {
+          ...config,
+          modelName: roleConfig.model,
+          baseUrl: roleConfig.baseUrl || config.baseUrl,
+          apiKey: roleConfig.apiKey || config.apiKey,
+        };
+        console.log(`[LLM] Using ${role} config: ${modelConfig.modelName} @ ${modelConfig.baseUrl || 'default'}`);
+      }
+    } catch (e) {
+      console.error(`[LLM] Failed to load config for role '${role}':`, e);
+    }
+  }
+
+  const modelName = options?.modelName || modelConfig.modelName || 'gpt-4';
+  const temperature = options?.temperature ?? modelConfig.temperature ?? 0.7;
+  const timeout = modelConfig.timeout * 1000;
+
+  const baseUrl = getBaseUrl(modelConfig);
+  const headers = getHeaders(modelConfig);
+  const messageFormat = formatMessages(messages, modelConfig.provider);
 
   // 替换 Azure 占位符
   let url = baseUrl;
-  if (config.provider === 'azure') {
+  if (modelConfig.provider === 'azure') {
     url = baseUrl
-      .replace('{resource-name}', config.baseUrl?.split('.')[0] || 'your-resource')
+      .replace('{resource-name}', modelConfig.baseUrl?.split('.')[0] || 'your-resource')
       .replace('{deployment-name}', modelName);
   } else {
     url = `${baseUrl}/chat/completions`;
@@ -223,13 +247,17 @@ export async function callLLM(
   };
 
   // Gemini 使用不同端点
-  if (config.provider === 'gemini') {
+  if (modelConfig.provider === 'gemini') {
     url = `${baseUrl}/models/${modelName}:generateContent`;
   }
+
+  console.log(`[LLM] Calling API: provider=${modelConfig.provider}, model=${modelName}, baseUrl=${baseUrl}`);
 
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    console.log(`[LLM] Request body:`, JSON.stringify(body, null, 2).substring(0, 500));
 
     const res = await fetch(url, {
       method: 'POST',
@@ -240,13 +268,21 @@ export async function callLLM(
 
     clearTimeout(timeoutId);
 
+    console.log(`[LLM] API response status: ${res.status}`);
+    console.log(`[LLM] Response headers:`, Object.fromEntries([...res.headers.entries()].slice(0, 10)));
+
     if (!res.ok) {
       const errorText = await res.text();
+      console.error(`[LLM] API error details:`, errorText.substring(0, 1000));
       throw new Error(`LLM API error: ${res.status} - ${errorText}`);
     }
 
     const data = await res.json() as Record<string, unknown>;
-    return parseResponse(data, config.provider);
+    console.log(`[LLM] Response data keys:`, Object.keys(data));
+    const response = parseResponse(data, modelConfig.provider);
+    console.log(`[LLM] Parsed response length: ${response.content.length}`);
+    console.log(`[LLM] Response preview: ${response.content.substring(0, 200).replace(/\n/g, ' ')}`);
+    return response;
   } catch (error) {
     console.error('LLM API call failed:', error);
     throw error;
@@ -263,6 +299,7 @@ export async function generateText(
     modelName?: string;
     temperature?: number;
     maxTokens?: number;
+    role?: 'analyzer' | 'extractor' | 'reporter';
   }
 ): Promise<string> {
   const messages: LLMMessage[] = [];

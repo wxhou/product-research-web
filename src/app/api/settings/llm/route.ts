@@ -74,14 +74,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 获取现有配置，保留未提供的值
+    const existingResult = settingsDb.get.get({ key: 'llm_config' }) as { value: string } | undefined;
+    let existingConfig: LLMConfig | null = null;
+    if (existingResult?.value) {
+      try {
+        existingConfig = JSON.parse(existingResult.value);
+      } catch (e) {
+        // ignore
+      }
+    }
+
     const config: LLMConfig = {
-      provider: provider || 'openai',
+      provider: provider || existingConfig?.provider || 'openai',
       // 只有兼容模式才保存自定义 baseUrl，否则设为 null
-      baseUrl: (provider === 'compatible' || provider === 'azure') ? (baseUrl || null) : null,
+      baseUrl: (provider === 'compatible' || provider === 'azure') ? (baseUrl || existingConfig?.baseUrl || null) : null,
       apiKey: apiKey || null,
-      modelName: modelName || null,
-      temperature: temperature || 0.7,
-      timeout: timeout || 120,
+      // 保留现有模型名称或使用默认值
+      modelName: modelName || existingConfig?.modelName || 'deepseek-ai/DeepSeek-R1-0528',
+      temperature: temperature || existingConfig?.temperature || 0.7,
+      timeout: timeout || existingConfig?.timeout || 120,
     };
 
     settingsDb.set.run({

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 
 interface Project {
@@ -36,12 +36,23 @@ interface TaskStatus {
   error?: string;
 }
 
+interface LogEntry {
+  timestamp: string;
+  level: 'info' | 'warn' | 'error';
+  tag: string;
+  message: string;
+  projectId?: string;
+}
+
 export default function ProjectViewer({ projectId }: { projectId: string }) {
   const [project, setProject] = useState<Project | null>(null);
   const [report, setReport] = useState<Report | null>(null);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [task, setTask] = useState<TaskStatus | null>(null);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showLogPanel, setShowLogPanel] = useState(false);
+  const logsEndRef = useRef<HTMLDivElement>(null);
 
   const fetchProjectData = useCallback(async () => {
     try {
@@ -76,6 +87,10 @@ export default function ProjectViewer({ projectId }: { projectId: string }) {
         if (data.data.task) {
           setTask(data.data.task);
         }
+        // 更新日志
+        if (data.data.logs && Array.isArray(data.data.logs)) {
+          setLogs(data.data.logs);
+        }
 
         // 如果项目完成或失败，停止轮询
         if (data.data.project?.status === 'completed' || data.data.project?.status === 'failed') {
@@ -87,6 +102,13 @@ export default function ProjectViewer({ projectId }: { projectId: string }) {
       console.error('Failed to fetch task progress:', error);
     }
   }, [projectId, fetchProjectData]);
+
+  // 自动滚动到最新日志
+  useEffect(() => {
+    if (showLogPanel && logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [logs, showLogPanel]);
 
   useEffect(() => {
     if (projectId) {
@@ -279,6 +301,39 @@ export default function ProjectViewer({ projectId }: { projectId: string }) {
               }}
             />
           </div>
+
+          {/* 日志面板开关 */}
+          <button
+            className="log-toggle-btn"
+            onClick={() => setShowLogPanel(!showLogPanel)}
+            style={{ marginTop: '12px' }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: showLogPanel ? 'rotate(90deg)' : 'none', transition: 'transform 0.2s' }}>
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+            {showLogPanel ? '隐藏详情日志' : '查看详情日志'}
+            {logs.length > 0 && <span className="log-count">{logs.length}</span>}
+          </button>
+
+          {/* 日志面板 */}
+          {showLogPanel && (
+            <div className="log-panel">
+              <div className="log-list">
+                {logs.length === 0 ? (
+                  <div className="log-empty">暂无日志</div>
+                ) : (
+                  logs.map((log, index) => (
+                    <div key={index} className={`log-entry log-${log.level}`}>
+                      <span className="log-time">{new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}</span>
+                      <span className="log-tag">[{log.tag}]</span>
+                      <span className="log-message">{log.message}</span>
+                    </div>
+                  ))
+                )}
+                <div ref={logsEndRef} />
+              </div>
+            </div>
+          )}
         </div>
       )}
 

@@ -24,7 +24,22 @@
       "WebFetch(domain:docs.siliconflow.cn)",
       "WebFetch(domain:platform.moonshot.cn)",
       "Bash(npm run build:*)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "mcp__MiniMax__web_search",
+      "mcp__ide__executeCode",
+      "mcp__chrome-devtools__press_key",
+      "mcp__chrome-devtools__wait_for",
+      "WebFetch(domain:towardsdatascience.com)",
+      "WebFetch(domain:ai-bot.cn)",
+      "Bash(npx tsc:*)",
+      "mcp__chrome-devtools__list_pages",
+      "WebSearch",
+      "mcp__MiniMax__understand_image",
+      "Bash(curl:*)",
+      "mcp__chrome-devtools__list_console_messages",
+      "Bash(jq:*)",
+      "Bash(python:*)",
+      "mcp__thinking__sequentialthinking"
     ]
   }
 }

@@ -18,6 +18,7 @@ export default function HomePage() {
   const [isResearching, setIsResearching] = useState(false);
   const [recentProjects, setRecentProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [researchMode, setResearchMode] = useState<'ai' | 'rule'>('ai');
   const router = useRouter();
   const { isAuthenticated } = useAuth();
 
@@ -143,14 +144,37 @@ export default function HomePage() {
           <div className="research-form card">
             <div className="form-group">
               <label>调研主题</label>
-              <input
-                type="text"
-                className="input"
-                placeholder="例如：智慧运维产品的故障维修预测性维护"
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleResearch()}
-              />
+              <div className="input-row">
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="例如：智慧运维产品的故障维修预测性维护"
+                  value={keyword}
+                  onChange={(e) => setKeyword(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleResearch()}
+                />
+                <div className="mode-toggle-outer" title={`当前: ${researchMode === 'ai' ? 'AI 智能分析' : '规则引擎分析'}`}>
+                  <button
+                    className={`mode-toggle-btn ${researchMode === 'ai' ? 'active' : ''}`}
+                    onClick={() => setResearchMode('ai')}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/>
+                    </svg>
+                  </button>
+                  <div className="toggle-divider-outer"></div>
+                  <button
+                    className={`mode-toggle-btn ${researchMode === 'rule' ? 'active' : ''}`}
+                    onClick={() => setResearchMode('rule')}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                      <path d="M2 17l10 5 10-5"/>
+                      <path d="M2 12l10 5 10-5"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
             </div>
 
             <button

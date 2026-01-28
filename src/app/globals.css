@@ -1241,6 +1241,57 @@ html[data-theme="dark"] .theme-toggle .moon-icon {
   animation: spin 0.8s linear infinite;
 }
 
+/* 输入框行布局（输入框 + 外部切换按钮） */
+.input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.input-row .input {
+  flex: 1;
+  height: 48px;
+  border-radius: var(--radius-md);
+}
+
+.mode-toggle-outer {
+  display: flex;
+  align-items: center;
+  background: var(--background-secondary);
+  border-radius: var(--radius-md);
+  padding: 4px;
+}
+
+.mode-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  color: var(--foreground-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+}
+
+.mode-toggle-btn:hover {
+  color: var(--foreground);
+  background: var(--background-tertiary);
+}
+
+.mode-toggle-btn.active {
+  background: var(--color-primary);
+  color: white;
+}
+
+.toggle-divider-outer {
+  width: 1px;
+  height: 24px;
+  background: var(--border-color);
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
@@ -1302,6 +1353,17 @@ html[data-theme="dark"] .theme-toggle .moon-icon {
 
 .current-model-badge strong {
   font-weight: 600;
+}
+
+.model-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: var(--background-subtle);
+  color: var(--foreground-muted);
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .view-all-link {
@@ -2736,6 +2798,19 @@ html[data-theme="dark"] .theme-toggle .moon-icon {
   text-transform: uppercase;
 }
 
+.api-key-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.625rem;
+  font-weight: 600;
+  padding: 0.125rem 0.375rem;
+  background: var(--warning-light);
+  color: var(--warning);
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+}
+
 .source-desc {
   font-size: 0.8125rem;
   color: var(--foreground-muted);
@@ -2827,6 +2902,49 @@ html[data-theme="dark"] .theme-toggle .moon-icon {
   display: flex;
   gap: 0.75rem;
   align-items: center;
+}
+
+/* Crawl4AI 配置样式 */
+.crawl4ai-config {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 280px;
+}
+
+.crawl4ai-url-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.crawl4ai-url-row .input {
+  flex: 1;
+  min-width: 200px;
+}
+
+.config-hint {
+  font-size: 0.8125rem;
+  color: var(--foreground-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.config-hint a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.config-hint a:hover {
+  text-decoration: underline;
+}
+
+.config-hint code {
+  background: var(--background-subtle);
+  padding: 0.125rem 0.375rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .api-key-input .input {
@@ -3455,4 +3573,138 @@ html[data-theme="dark"] .auth-btn:hover:not(:disabled) {
   .auth-card-inner {
     padding: 2.5rem 1.75rem;
   }
+}
+
+/* 日志面板样式 */
+.log-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--background-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  color: var(--foreground-secondary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.log-toggle-btn:hover {
+  background: var(--border-light);
+  color: var(--foreground);
+}
+
+.log-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--color-primary);
+  color: white;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.log-panel {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--background-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.log-list {
+  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.log-empty {
+  color: var(--foreground-muted);
+  text-align: center;
+  padding: 1rem;
+}
+
+.log-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.log-entry:last-child {
+  border-bottom: none;
+}
+
+.log-time {
+  color: var(--foreground-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.log-tag {
+  color: var(--color-primary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.log-message {
+  color: var(--foreground);
+  word-break: break-word;
+}
+
+.log-info .log-message {
+  color: var(--foreground);
+}
+
+.log-warn .log-time,
+.log-warn .log-tag {
+  color: var(--warning);
+}
+
+.log-warn .log-message {
+  color: var(--warning);
+}
+
+.log-error .log-time,
+.log-error .log-tag {
+  color: var(--error);
+}
+
+.log-error .log-message {
+  color: var(--error);
+}
+
+/* 暗色模式适配 */
+html[data-theme="dark"] .log-toggle-btn {
+  background: var(--background-subtle);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] .log-toggle-btn:hover {
+  background: var(--border);
+}
+
+html[data-theme="dark"] .log-panel {
+  background: var(--background-subtle);
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] .log-list {
+  color: var(--foreground);
+}
+
+html[data-theme="dark"] .log-entry {
+  border-color: var(--border);
+}
+
+html[data-theme="dark"] .log-empty {
+  color: var(--foreground-muted);
 }
