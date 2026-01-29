@@ -51,6 +51,7 @@ interface QualityThresholds {
   minUseCases: number;
   minTechStack: number;
   minSearchResults: number;
+  minIterations: number;
   completionScore: number;  // 达到此分数认为完成
 }
 
@@ -69,7 +70,7 @@ interface IndividualSummary {
   limitations: string[];
   qualityScore: number;
   // 新增：信息密度评估
-  informationDensity: {
+  informationDensity?: {
     featureDensity: number;
     competitorDensity: number;
     techDensity: number;
@@ -97,6 +98,8 @@ interface ComprehensiveSummary {
     reliability: number;   // 0-100
     depth: number;         // 0-100
   };
+  // 功能出现频率统计
+  featureFrequency?: Record<string, number>;
 }
 
 // 深度分析结果
@@ -120,7 +123,7 @@ interface DataQualityCheck {
   score: number;
   issues: string[];
   suggestions: string[];
-  coverage: Record<string, boolean>;
+  coverage: Record<string, number>;
   missingDimensions: string[];  // 缺失的研究维度
   recommendedQueries: SearchQuery[]; // 推荐的搜索查询
 }
@@ -163,6 +166,7 @@ const CONFIG = {
     minUseCases: 3,
     minTechStack: 2,
     minSearchResults: 15,
+    minIterations: 3,
     completionScore: 60,
   },
   DEFAULT_DIMENSIONS: [
@@ -173,6 +177,15 @@ const CONFIG = {
     '使用场景与用户案例',
   ],
 };
+
+// 缓存 model-roles 模块的导入，避免重复动态导入
+let cachedModelRoles: any = null;
+async function getModelRolesConfig() {
+  if (!cachedModelRoles) {
+    cachedModelRoles = await import('@/lib/model-roles');
+  }
+  return cachedModelRoles;
+}
 
 // ============================================================
 // 节点函数
@@ -199,7 +212,7 @@ async function planResearch(
     // 无 API Key 时使用默认配置
     return {
       queries: generateDefaultQueries(title),
-      targetSources: ['duckduckgo', 'github'],
+      targetSources: ['duckduckgo'],
       researchDimensions: CONFIG.DEFAULT_DIMENSIONS,
       qualityThresholds: CONFIG.DEFAULT_QUALITY_THRESHOLDS,
     };
@@ -241,7 +254,7 @@ async function planResearch(
       "hints": "搜索提示，告诉搜索引擎需要什么类型的信息"
     }
   ],
-  "targetSources": ["duckduckgo", "github"]
+  "targetSources": ["duckduckgo"]
 }
 
 【重要提示】
@@ -264,7 +277,7 @@ async function planResearch(
       // 验证并补全数据结构
       return {
         queries: plan.queries || generateDefaultQueries(title),
-        targetSources: plan.targetSources || ['duckduckgo', 'github'],
+        targetSources: plan.targetSources || ['duckduckgo'],
         researchDimensions: plan.researchDimensions || CONFIG.DEFAULT_DIMENSIONS,
         qualityThresholds: {
           ...CONFIG.DEFAULT_QUALITY_THRESHOLDS,
@@ -278,7 +291,7 @@ async function planResearch(
 
   return {
     queries: generateDefaultQueries(title),
-    targetSources: ['duckduckgo', 'github'],
+    targetSources: ['duckduckgo'],
     researchDimensions: CONFIG.DEFAULT_DIMENSIONS,
     qualityThresholds: CONFIG.DEFAULT_QUALITY_THRESHOLDS,
   };
@@ -306,6 +319,7 @@ function generateDefaultQueries(title: string): SearchQuery[] {
  * - 动态调整结果数量
  */
 async function executeWebResearch(
+  title: string,
   plan: SearchPlan,
   previousResults: SearchResult[]
 ): Promise<SearchResult[]> {
@@ -358,6 +372,10 @@ async function executeWebResearch(
   if (enrichedResults.length > uniqueResults.length) {
     console.log(`Crawl4AI enriched ${enrichedResults.length - uniqueResults.length} results with full content`);
   }
+
+  // GitHub 过滤器已禁用（数据源已移除）
+  // 注释掉：const filteredResults = await filterGitHubNoiseWithLLM(enrichedResults, title);
+  // return filteredResults.filter(r => !previousResults.some(pr => pr.url === r.url));
 
   return enrichedResults.filter(r => !previousResults.some(pr => pr.url === r.url));
 }
@@ -424,8 +442,26 @@ async function enrichResultsWithCrawl4AI(results: SearchResult[]): Promise<Searc
 
     for (let i = 0; i < urlsToCrawl.length; i += maxConcurrent) {
       const batch = urlsToCrawl.slice(i, i + maxConcurrent);
-      // 传入原始内容映射
-      const batchResults = await crawlUrls(batch, originalContents, 30000);
+      // 使用更长的超时时间（60秒）处理批量爬取
+      let batchResults: Crawl4SearchResult[] = [];
+      try {
+        batchResults = await crawlUrls(batch, originalContents, 60000);
+      } catch (batchError) {
+        console.error(`[Crawl4AI] Batch ${i}-${i + batch.length} failed, falling back to individual crawl:`, batchError);
+        // 降级：逐个爬取
+        for (const url of batch) {
+          try {
+            const singleResult = await crawlUrls([url], originalContents, 30000);
+            if (singleResult.length > 0) {
+              batchResults.push(...singleResult);
+            }
+          } catch (singleError) {
+            console.error(`[Crawl4AI] Failed to crawl ${url}:`, singleError);
+          }
+          // 每个 URL 之间增加延迟
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
 
       // 添加延迟避免请求过快
       if (i + maxConcurrent < urlsToCrawl.length) {
@@ -436,19 +472,55 @@ async function enrichResultsWithCrawl4AI(results: SearchResult[]): Promise<Searc
     }
 
     // 用爬取的内容替换原有结果
-    const resultMap = new Map(results.map(r => [r.url, r]));
+    // 注意：Crawl4AI 返回的是真实 URL，而原始结果是 DuckDuckGo 重定向链接
+    const resultMap = new Map<string, SearchResult>();
+    for (const r of results) {
+      // 尝试使用原始 URL 作为 key
+      resultMap.set(r.url, r);
+    }
+
+    // 构建 URL 反向映射（真实 URL -> 重定向 URL）
+    const reverseUrlMap = new Map<string, string>();
+    for (const r of results) {
+      if (r.url.includes('duckduckgo.com/l/') && r.url.includes('uddg=')) {
+        try {
+          const urlObj = new URL(r.url.startsWith('http') ? r.url : 'https:' + r.url);
+          const realUrl = urlObj.searchParams.get('uddg');
+          if (realUrl) {
+            reverseUrlMap.set(decodeURIComponent(realUrl), r.url);
+          }
+        } catch (e) {
+          // 忽略解析错误
+        }
+      }
+    }
 
     for (const enriched of enrichedResults) {
-      if (enriched && enriched.url && resultMap.has(enriched.url)) {
-        const original = resultMap.get(enriched.url)!;
-        // 保留原始的搜索维度信息，但使用完整内容
-        (enriched as SearchResult & { searchPurpose: string }).searchPurpose = (original as any).searchPurpose;
-        (enriched as SearchResult & { searchDimension: string }).searchDimension = (original as any).searchDimension;
-        (enriched as SearchResult & { queryId: string }).queryId = (original as any).queryId;
-        (enriched as any).crawled = true; // 标记已爬取
+      if (enriched && enriched.url) {
+        // 优先使用真实 URL 匹配
+        if (resultMap.has(enriched.url)) {
+          const original = resultMap.get(enriched.url)!;
+          // 保留原始的搜索维度信息，但使用完整内容
+          (enriched as SearchResult & { searchPurpose: string }).searchPurpose = (original as any).searchPurpose;
+          (enriched as SearchResult & { searchDimension: string }).searchDimension = (original as any).searchDimension;
+          (enriched as SearchResult & { queryId: string }).queryId = (original as any).queryId;
+          (enriched as any).crawled = true;
 
-        // 更新结果
-        resultMap.set(enriched.url, enriched);
+          // 更新结果
+          resultMap.set(enriched.url, enriched);
+        }
+        // 尝试使用重定向 URL 匹配
+        else if (reverseUrlMap.has(enriched.url)) {
+          const original = resultMap.get(reverseUrlMap.get(enriched.url)!)!;
+          // 保留原始的搜索维度信息，但使用完整内容
+          (enriched as SearchResult & { searchPurpose: string }).searchPurpose = (original as any).searchPurpose;
+          (enriched as SearchResult & { searchDimension: string }).searchDimension = (original as any).searchDimension;
+          (enriched as SearchResult & { queryId: string }).queryId = (original as any).queryId;
+          (enriched as any).crawled = true;
+
+          // 使用真实 URL 作为 key
+          resultMap.set(enriched.url, enriched);
+        }
       }
     }
 
@@ -457,6 +529,150 @@ async function enrichResultsWithCrawl4AI(results: SearchResult[]): Promise<Searc
   } catch (error) {
     console.error('Crawl4AI enrichment failed:', error);
     return results; // 如果爬取失败，返回原始结果
+  }
+}
+
+/**
+ * 使用 LLM 智能过滤 GitHub 噪音数据
+ *
+ * 对于 GitHub 搜索结果，LLM 判断仓库是否与研究主题相关
+ * 如果不相关，标记为噪音，在后续处理中降低优先级或排除
+ */
+async function filterGitHubNoiseWithLLM(
+  results: SearchResult[],
+  projectTitle: string
+): Promise<SearchResult[]> {
+  // 只处理 GitHub 来源的结果
+  const githubResults = results.filter(r =>
+    r.source.toLowerCase().includes('github') ||
+    r.url.toLowerCase().includes('github.com')
+  );
+
+  if (githubResults.length === 0) {
+    return results; // 没有 GitHub 结果，直接返回
+  }
+
+  console.log(`[LLM Filter] Analyzing ${githubResults.length} GitHub results for relevance...`);
+
+  const config = getLLMConfig();
+  const modelRoles = await getModelRolesConfig();
+  const hasApiKey = !!(config.apiKey || modelRoles.getModelConfig('extractor')?.apiKey);
+
+  // 如果没有 API Key，使用简单的规则过滤
+  if (!hasApiKey) {
+    console.log(`[LLM Filter] No API key, using simple rule-based filter`);
+    // 简单规则：排除包含特定噪音关键词的仓库
+    const noisePatterns = [
+      /books?/i,
+      /tutorial/i,
+      /example[sz]?/i,
+      /sample[sz]?/i,
+      /learn/i,
+      /study/i,
+      /course/i,
+      /awesome-list/i,
+      /x86.*bare.*metal/i,
+    ];
+
+    return results.filter(r => {
+      const isGithub = r.source.toLowerCase().includes('github') || r.url.toLowerCase().includes('github.com');
+      if (!isGithub) return true; // 非 GitHub 结果保留
+
+      // 检查标题是否匹配噪音模式
+      const title = r.title || '';
+      const isNoise = noisePatterns.some(pattern => pattern.test(title));
+      if (isNoise) {
+        console.log(`[LLM Filter] Filtered noise: ${title.substring(0, 50)}...`);
+        return false; // 排除噪音
+      }
+      return true; // 保留
+    });
+  }
+
+  // 使用 LLM 判断相关性
+  const repoList = githubResults.map((r, i) => {
+    const url = r.url || '';
+    const title = r.title || '';
+    // 提取仓库路径
+    const match = url.match(/github\.com\/([^\/]+\/[^\/]+)/);
+    const repoPath = match ? match[1] : title;
+    return `${i + 1}. ${repoPath}`;
+  }).join('\n');
+
+  const prompt = `请判断以下 GitHub 仓库是否与"${projectTitle}"相关。
+
+【任务】
+逐个分析仓库，判断是否与研究主题相关。相关指：
+- 仓库是关于轨道巡检/轨道交通/智能运维的产品、项目或代码
+- 包含实际的巡检机器人、检测系统、监控系统等
+
+不相关指：
+- 只是提到轨道巡检的文档、书籍列表、教程
+- 与轨道巡检完全无关的项目（x86 汇编示例、书籍列表等）
+
+【GitHub 仓库列表】
+${repoList}
+
+【研究主题】
+${projectTitle}
+
+【输出格式】
+请返回 JSON 数组，只包含相关仓库的序号：
+[1, 3, 5]  // 表示第1、3、5个仓库相关
+
+【注意】
+- 严格判断，只标记明确相关的仓库
+- 如果某个仓库与研究主题无关或无法确定， 不要包含其序号`;
+
+  try {
+    const response = await generateText(prompt, undefined, {
+      role: 'extractor',
+      temperature: 0.1,
+      maxTokens: 500,
+    });
+
+    // 解析响应，提取相关仓库序号
+    const jsonMatch = response.match(/\[[\s\S]*?\]/);
+    let relevantIndices: number[] = [];
+
+    if (jsonMatch) {
+      try {
+        relevantIndices = JSON.parse(jsonMatch[0]);
+        console.log(`[LLM Filter] LLM identified ${relevantIndices.length} relevant GitHub repos`);
+      } catch {
+        // 解析失败，尝试其他方式
+        const numbers = response.match(/\d+/g);
+        if (numbers) {
+          relevantIndices = numbers.map(Number).filter(n => n > 0 && n <= githubResults.length);
+        }
+      }
+    }
+
+    // 构建相关索引集合
+    const relevantSet = new Set(relevantIndices.map(i => i - 1)); // 转为 0-based
+
+    // 过滤结果
+    const filteredResults = results.filter((r, index) => {
+      const isGithub = r.source.toLowerCase().includes('github') || r.url.toLowerCase().includes('github.com');
+      if (!isGithub) return true; // 非 GitHub 结果保留
+
+      const githubIndex = githubResults.findIndex(gr => gr.url === r.url);
+      if (githubIndex === -1) return true; // 找不到对应关系，保留
+
+      const isRelevant = relevantSet.has(githubIndex);
+      if (!isRelevant) {
+        console.log(`[LLM Filter] Filtered irrelevant GitHub repo: ${r.title.substring(0, 50)}...`);
+      }
+      return isRelevant;
+    });
+
+    const removedCount = results.length - filteredResults.length;
+    console.log(`[LLM Filter] Filtered ${removedCount} noise results from GitHub`);
+    return filteredResults;
+
+  } catch (error) {
+    console.error(`[LLM Filter] Failed to filter GitHub noise:`, error);
+    return results; // 如果失败，返回原始结果
   }
 }
 
@@ -572,13 +788,64 @@ async function reflection(
   const dimensionCoverage = analyzeDimensionCoverage(summaries, plan.researchDimensions);
   const overallCoverage = calculateOverallCoverage(dimensionCoverage);
 
+  // 检查是否有摘要数据
+  if (summaries.length === 0) {
+    return {
+      needsMoreResearch: true,
+      newQueries: [],
+      coverage: overallCoverage.counts,
+      analysis: '无摘要数据，LLM提取可能失败，需要检查API配置',
+    };
+  }
+
+  // 检查竞品和市场数据是否足够（优先检查）
+  const allCompetitors = new Set<string>();
+  const allMarketInfo: string[] = [];
+  for (const summary of summaries) {
+    for (const comp of summary.competitors || []) {
+      allCompetitors.add(comp);
+    }
+    // 市场信息去重后再添加
+    if (summary.marketInfo && !allMarketInfo.includes(summary.marketInfo)) {
+      allMarketInfo.push(summary.marketInfo);
+    }
+  }
+
+  // 生成竞品和市场补充查询
+  const supplementalQueries: SearchQuery[] = [];
+  let queryId = 1;
+
+  // 如果竞品不足，生成竞品搜索查询
+  if (allCompetitors.size < 3) {
+    supplementalQueries.push({
+      id: `qs${queryId++}`,
+      query: `${projectTitle} 主要厂商 公司 品牌 竞品`,
+      purpose: '搜索竞品和主要厂商信息',
+      dimension: '竞品分析',
+      priority: 1,
+      hints: `请重点搜索轨道巡检领域的主要厂商、公司和品牌。目前只找到 ${allCompetitors.size} 个竞品，请补充更多厂商信息。`,
+    });
+  }
+
+  // 如果市场信息不足，生成市场搜索查询
+  if (allMarketInfo.length < 3) {
+    supplementalQueries.push({
+      id: `qs${queryId++}`,
+      query: `${projectTitle} 市场规模 增长率 竞争格局 2024 2025`,
+      purpose: '搜索市场规模和趋势数据',
+      dimension: '市场规模与趋势',
+      priority: 2,
+      hints: `请重点搜索轨道巡检行业的市场规模、增长率、市场份额和竞争格局等数据。`,
+    });
+  }
+
   if (!hasApiKey) {
-    const needsMore = overallCoverage.score < plan.qualityThresholds.completionScore;
+    const needsMore = overallCoverage.score < plan.qualityThresholds.completionScore || allCompetitors.size < 3;
     return {
       needsMoreResearch: needsMore,
-      newQueries: needsMore ? generateSupplementalQueries(plan, dimensionCoverage) : [],
+      newQueries: [...supplementalQueries, ...(needsMore ? generateSupplementalQueries(plan, dimensionCoverage) : [])],
       coverage: overallCoverage.counts,
-      analysis: '基于规则的分析：信息覆盖率不足',
+      analysis: `基于规则的分析：竞品${allCompetitors.size}个，市场信息${allMarketInfo.length}条，信息覆盖率${overallCoverage.score.toFixed(0)}%`,
     };
   }
 
@@ -1185,6 +1452,1283 @@ function generateFallbackAnalysis(summary: ComprehensiveSummary, projectTitle: s
   };
 }
 
+// ============================================================
+// 多步骤深度分析（逐步完成，确保完整性）
+// ============================================================
+
+interface AnalysisStepResult<T> {
+  data: T;
+  quality: number;
+  issues: string[];
+  supplementalQueries: SearchQuery[];
+}
+
+// 定义各步骤的数据类型
+interface FeaturesStepData {
+  features: Array<{ name: string; count: number; sources: string[]; description: string }>;
+}
+
+interface CompetitorsStepData {
+  competitors: Array<{ name: string; features: string[]; description: string; marketPosition: string }>;
+}
+
+interface MarketStepData {
+  marketData: { marketSize: string; growthRate: string; keyPlayers: string[]; trends: string[]; segments: string[] };
+}
+
+interface TechStepData {
+  techAnalysis: { architecture: string[]; techStack: string[]; emergingTech: string[] };
+}
+
+interface UseCasesStepData {
+  useCases: string[];
+}
+
+/**
+ * 步骤1: 分析产品功能特性
+ * 直接使用原始内容进行分析，不依赖名称列表
+ */
+async function analyzeFeaturesStep(
+  summary: ComprehensiveSummary,
+  projectTitle: string
+): Promise<AnalysisStepResult<FeaturesStepData>> {
+  const config = getLLMConfig();
+  const hasApiKey = !!config.apiKey;
+
+  const rawInsights = summary.rawInsights;
+
+  // 无 API Key 时，基于原始内容提取功能
+  if (!hasApiKey || rawInsights.length === 0) {
+    const features = extractFeaturesFromContent(rawInsights, projectTitle);
+    return {
+      data: { features },
+      quality: features.length >= 5 ? 80 : 40,
+      issues: features.length < 5 ? ['功能数量不足'] : [],
+      supplementalQueries: features.length < 5 ? [{
+        id: 'sq-feature-1',
+        query: `${projectTitle} 核心功能 主要特性 产品能力`,
+        purpose: '搜索产品功能特性',
+        dimension: '产品功能特性',
+        priority: 1,
+        hints: '请列出产品的所有核心功能点',
+      }] : [],
+    };
+  }
+
+  // 直接使用原始内容进行分析，而不是依赖名称列表
+  const contentContext = rawInsights
+    .slice(0, 15)
+    .map((r, i) => `[来源${i + 1}] ${r.source}\n标题: ${r.title}\n内容: ${r.content.substring(0, 800)}`)
+    .join('\n\n');
+
+  const prompt = `请根据以下原始内容，详细分析产品功能特性。
+
+【研究主题】
+${projectTitle}
+
+【原始内容来源】
+${contentContext}
+
+【任务】
+请进行详细的功能分析，返回 JSON 格式：
+
+{
+  "features": [
+    {
+      "name": "功能名称（简洁的中文名称）",
+      "count": 在多少个来源中被提及,
+      "sources": ["来源1", "来源2"],
+      "description": "功能的具体描述、能力、使用方式和价值（至少80字）"
+    }
+  ]
+}
+
+要求：
+1. 仔细阅读每个来源的内容，提取产品功能
+2. 每个功能需要详细的描述，说明是什么、做什么用、有什么价值
+3. 统计每个功能在多少个来源中被提及
+4. 按功能重要性和出现频率排序
+5. 至少提取 8-15 个功能
+6. 如果某个功能在多个来源中都有详细描述，说明其重要性`;
+
+  try {
+    const result = await generateText(prompt, undefined, {
+      temperature: 0.3,
+      maxTokens: 5000,
+      role: 'analyzer',
+    });
+
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const features = (parsed.features || []).map((f: any) => ({
+        name: f.name || '',
+        count: f.count || 1,
+        sources: f.sources || [],
+        description: f.description || '',
+      }));
+
+      const issues: string[] = [];
+      const featuresWithDesc = features.filter((f: { description: string }) => f.description && f.description.length > 50);
+      if (featuresWithDesc.length < 8) {
+        issues.push('部分功能描述不足');
+      }
+
+      return {
+        data: { features },
+        quality: featuresWithDesc.length >= 8 ? 90 : 60,
+        issues,
+        supplementalQueries: featuresWithDesc.length < 8 ? [{
+          id: 'sq-feature-1',
+          query: `${projectTitle} 核心功能 产品特性 能力清单`,
+          purpose: '补充功能特性详情',
+          dimension: '产品功能特性',
+          priority: 1,
+          hints: '请详细描述每个功能的具体能力、使用方式和商业价值',
+        }] : [],
+      };
+    }
+  } catch (error) {
+    console.error('功能分析失败:', error);
+  }
+
+  // Fallback: 基于原始内容提取
+  const features = extractFeaturesFromContent(rawInsights, projectTitle);
+  return {
+    data: { features },
+    quality: features.length >= 5 ? 70 : 40,
+    issues: ['功能分析失败，使用回退逻辑'],
+    supplementalQueries: features.length < 5 ? [{
+      id: 'sq-feature-1',
+      query: `${projectTitle} 核心功能`,
+      purpose: '补充功能信息',
+      dimension: '产品功能特性',
+      priority: 1,
+    }] : [],
+  };
+}
+
+/**
+ * 从原始内容中提取功能（无 LLM 时使用）
+ */
+function extractFeaturesFromContent(rawInsights: IndividualSummary[], projectTitle: string) {
+  const featureMap = new Map<string, { count: number; sources: Set<string>; description: string }>();
+
+  for (const insight of rawInsights) {
+    // 从 keyPoints 提取潜在功能
+    for (const point of insight.keyPoints || []) {
+      if (point.length > 10 && point.length < 100) {
+        const name = point.split(' ').slice(0, 6).join(' ');
+        if (!featureMap.has(name)) {
+          featureMap.set(name, { count: 0, sources: new Set(), description: point });
+        }
+        featureMap.get(name)!.count++;
+        featureMap.get(name)!.sources.add(insight.source);
+      }
+    }
+  }
+
+  return Array.from(featureMap.entries())
+    .map(([name, data]) => ({
+      name,
+      count: data.count,
+      sources: Array.from(data.sources),
+      description: data.description,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 15);
+}
+
+/**
+ * 步骤2: 分析竞品和替代方案
+ * 直接使用原始内容进行分析，不依赖名称列表
+ */
+async function analyzeCompetitorsStep(
+  summary: ComprehensiveSummary,
+  projectTitle: string
+): Promise<AnalysisStepResult<CompetitorsStepData>> {
+  const config = getLLMConfig();
+  const hasApiKey = !!config.apiKey;
+
+  const rawInsights = summary.rawInsights;
+
+  // 无 API Key 时，基于原始内容提取竞品
+  if (!hasApiKey || rawInsights.length === 0) {
+    const competitors = extractCompetitorsFromContent(rawInsights, projectTitle);
+    return {
+      data: { competitors },
+      quality: competitors.length >= 3 ? 70 : 30,
+      issues: competitors.length < 3 ? ['竞品数量不足'] : [],
+      supplementalQueries: competitors.length < 3 ? [{
+        id: 'sq-comp-1',
+        query: `${projectTitle} 主要厂商 竞争对手 品牌 公司`,
+        purpose: '搜索竞品和主要厂商',
+        dimension: '竞品分析',
+        priority: 1,
+        hints: '请列出该领域的主要公司和品牌',
+      }] : [],
+    };
+  }
+
+  // 直接使用原始内容进行分析
+  const contentContext = rawInsights
+    .slice(0, 15)
+    .map((r, i) => `[来源${i + 1}] ${r.source}\n标题: ${r.title}\n内容: ${r.content.substring(0, 800)}`)
+    .join('\n\n');
+
+  const prompt = `请根据以下原始内容，详细分析产品的竞品和替代方案。
+
+【研究主题】
+${projectTitle}
+
+【原始内容来源】
+${contentContext}
+
+【任务】
+请进行详细的竞品分析，返回 JSON 格式：
+
+{
+  "competitors": [
+    {
+      "name": "竞品名称（公司名或产品名）",
+      "features": ["主要功能1", "主要功能2"],
+      "description": "竞品的详细介绍：是什么公司/产品、主要做什么、有什么特点、面向哪些用户（至少100字）",
+      "marketPosition": "市场定位描述：如高端/中端/低端、企业级/消费级等"
+    }
+  ]
+}
+
+要求：
+1. 仔细阅读每个来源的内容，识别竞品和替代方案
+2. 每个竞品需要有详细的描述（至少100字）
+3. 列出竞品的主要功能（如果有提及）
+4. 说明竞品的市场定位
+5. 区分直接竞品（做同样产品）和间接竞品（满足同样需求）
+6. 至少提取 5-10 个竞品`;
+
+  try {
+    const result = await generateText(prompt, undefined, {
+      temperature: 0.3,
+      maxTokens: 5000,
+      role: 'analyzer',
+    });
+
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const competitors = (parsed.competitors || []).map((c: any) => ({
+        name: c.name || '',
+        features: c.features || [],
+        description: c.description || '',
+        marketPosition: c.marketPosition || '',
+      }));
+
+      const issues: string[] = [];
+      const competitorsWithDesc = competitors.filter((c: { description: string }) => c.description && c.description.length > 80);
+      if (competitorsWithDesc.length < 5) {
+        issues.push('竞品描述不足');
+      }
+
+      return {
+        data: { competitors },
+        quality: competitorsWithDesc.length >= 5 ? 85 : 50,
+        issues,
+        supplementalQueries: competitorsWithDesc.length < 5 ? [{
+          id: 'sq-comp-1',
+          query: `${projectTitle} 竞争对手 竞品对比 主要厂商`,
+          purpose: '补充竞品详细信息',
+          dimension: '竞品分析',
+          priority: 1,
+          hints: '请提供竞品的详细介绍、公司背景和市场份额信息',
+        }] : [],
+      };
+    }
+  } catch (error) {
+    console.error('竞品分析失败:', error);
+  }
+
+  // Fallback: 基于原始内容提取
+  const competitors = extractCompetitorsFromContent(rawInsights, projectTitle);
+  return {
+    data: { competitors },
+    quality: competitors.length >= 3 ? 60 : 30,
+    issues: ['竞品分析失败，使用回退逻辑'],
+    supplementalQueries: competitors.length < 3 ? [{
+      id: 'sq-comp-1',
+      query: `${projectTitle} 竞争对手`,
+      purpose: '补充竞品信息',
+      dimension: '竞品分析',
+      priority: 1,
+    }] : [],
+  };
+}
+
+/**
+ * 从原始内容中提取竞品（无 LLM 时使用）
+ */
+function extractCompetitorsFromContent(rawInsights: IndividualSummary[], projectTitle: string) {
+  const competitorMap = new Map<string, { features: Set<string>; sources: Set<string>; description: string }>();
+
+  for (const insight of rawInsights) {
+    for (const comp of insight.competitors || []) {
+      if (comp.length > 2 && comp.length < 50) {
+        if (!competitorMap.has(comp)) {
+          competitorMap.set(comp, { features: new Set(), sources: new Set(), description: '' });
+        }
+        competitorMap.get(comp)!.sources.add(insight.source);
+      }
+    }
+  }
+
+  return Array.from(competitorMap.entries())
+    .map(([name, data]) => ({
+      name,
+      features: Array.from(data.features).slice(0, 5),
+      description: '',
+      marketPosition: '',
+    }))
+    .slice(0, 10);
+  }
+
+/**
+ * 步骤3: 分析市场规模和趋势
+ * 直接使用原始内容进行分析
+ */
+async function analyzeMarketStep(
+  summary: ComprehensiveSummary,
+  projectTitle: string
+): Promise<AnalysisStepResult<MarketStepData>> {
+  const config = getLLMConfig();
+  const hasApiKey = !!config.apiKey;
+
+  const rawInsights = summary.rawInsights;
+
+  // 无 API Key 时
+  if (!hasApiKey || rawInsights.length === 0) {
+    const marketData = {
+      marketSize: '',
+      growthRate: '',
+      keyPlayers: [],
+      trends: [],
+      segments: [],
+    };
+    return {
+      data: { marketData },
+      quality: 30,
+      issues: ['无市场数据'],
+      supplementalQueries: [{
+        id: 'sq-market-1',
+        query: `${projectTitle} 市场规模 增长率 市场趋势`,
+        purpose: '搜索市场规模和趋势数据',
+        dimension: '市场规模与趋势',
+        priority: 1,
+        hints: '请提供市场规模和发展趋势数据',
+      }],
+    };
+  }
+
+  // 直接使用原始内容进行分析
+  const contentContext = rawInsights
+    .slice(0, 15)
+    .map((r, i) => `[来源${i + 1}] ${r.source}\n标题: ${r.title}\n内容: ${r.content.substring(0, 800)}`)
+    .join('\n\n');
+
+  const prompt = `请根据以下原始内容，分析市场规模、增长趋势和主要参与者。
+
+【研究主题】
+${projectTitle}
+
+【原始内容来源】
+${contentContext}
+
+【任务】
+请进行详细的市场分析，返回 JSON 格式：
+
+{
+  "marketData": {
+    "marketSize": "市场规模描述（如：全球市场规模约XX亿美元，中国市场XX亿元）",
+    "growthRate": "增长率描述（如：年复合增长率XX%，快速增长/稳定增长）",
+    "keyPlayers": ["主要厂商1", "主要厂商2", "主要厂商3"],
+    "trends": ["趋势1", "趋势2", "趋势3", "趋势4"],
+    "segments": ["细分市场1", "细分市场2"]
+  }
+}
+
+要求：
+1. 仔细阅读每个来源的市场相关信息
+2. 如果有具体的市场规模数据，尽量给出数字
+3. 识别主要的市场参与者（公司）
+4. 分析市场发展趋势（如：AI 驱动、云端化、自动化等）
+5. 识别不同的细分市场
+6. 如果某个信息在多个来源中一致，说明其可靠性`;
+
+  try {
+    const result = await generateText(prompt, undefined, {
+      temperature: 0.3,
+      maxTokens: 4000,
+      role: 'analyzer',
+    });
+
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const marketData = {
+        marketSize: parsed.marketData?.marketSize || '',
+        growthRate: parsed.marketData?.growthRate || '',
+        keyPlayers: parsed.marketData?.keyPlayers || [],
+        trends: parsed.marketData?.trends || [],
+        segments: parsed.marketData?.segments || [],
+      };
+
+      const issues: string[] = [];
+      if (!marketData.marketSize) issues.push('缺乏市场规模数据');
+      if (!marketData.growthRate) issues.push('缺乏增长率数据');
+      if (marketData.keyPlayers.length < 3) issues.push('主要参与者识别不足');
+
+      const quality = (marketData.marketSize ? 30 : 0) +
+                      (marketData.growthRate ? 20 : 0) +
+                      (marketData.keyPlayers.length >= 3 ? 20 : 0) +
+                      (marketData.trends.length >= 3 ? 20 : 0) +
+                      (marketData.segments.length >= 2 ? 10 : 0);
+
+      return {
+        data: { marketData },
+        quality,
+        issues,
+        supplementalQueries: issues.length > 0 ? [{
+          id: 'sq-market-1',
+          query: `${projectTitle} 市场规模 增长率 市场趋势 主要厂商 2024 2025`,
+          purpose: '补充市场规模和趋势数据',
+          dimension: '市场规模与趋势',
+          priority: 1,
+          hints: '请提供具体的市场数据、数字和发展趋势',
+        }] : [],
+      };
+    }
+  } catch (error) {
+    console.error('市场分析失败:', error);
+  }
+
+  return {
+    data: { marketData: { marketSize: '', growthRate: '', keyPlayers: [], trends: [], segments: [] } },
+    quality: 20,
+    issues: ['市场分析失败'],
+    supplementalQueries: [{
+      id: 'sq-market-1',
+      query: `${projectTitle} 市场规模 市场趋势`,
+      purpose: '搜索市场数据',
+      dimension: '市场规模与趋势',
+      priority: 1,
+    }],
+  };
+}
+
+/**
+ * 步骤4: 分析技术架构和栈
+ * 直接使用原始内容进行分析
+ */
+async function analyzeTechStackStep(
+  summary: ComprehensiveSummary,
+  projectTitle: string
+): Promise<AnalysisStepResult<TechStepData>> {
+  const config = getLLMConfig();
+  const hasApiKey = !!config.apiKey;
+
+  const rawInsights = summary.rawInsights;
+
+  // 无 API Key 时
+  if (!hasApiKey || rawInsights.length === 0) {
+    const techAnalysis = {
+      architecture: [],
+      techStack: [],
+      emergingTech: [],
+    };
+    return {
+      data: { techAnalysis },
+      quality: 30,
+      issues: ['无技术数据'],
+      supplementalQueries: [{
+        id: 'sq-tech-1',
+        query: `${projectTitle} 技术架构 技术栈 技术方案`,
+        purpose: '搜索技术架构信息',
+        dimension: '技术架构',
+        priority: 1,
+        hints: '请列出产品使用的核心技术栈和架构方案',
+      }],
+    };
+  }
+
+  // 直接使用原始内容进行分析
+  const contentContext = rawInsights
+    .slice(0, 15)
+    .map((r, i) => `[来源${i + 1}] ${r.source}\n标题: ${r.title}\n内容: ${r.content.substring(0, 800)}`)
+    .join('\n\n');
+
+  const prompt = `请根据以下原始内容，分析产品的技术架构和技术栈。
+
+【研究主题】
+${projectTitle}
+
+【原始内容来源】
+${contentContext}
+
+【任务】
+请进行详细的技术分析，返回 JSON 格式：
+
+{
+  "techAnalysis": {
+    "architecture": ["架构特点1：描述...", "架构特点2：描述..."],
+    "techStack": ["技术1（前端/后端/数据库/云服务）", "技术2", "技术3"],
+    "emergingTech": ["新兴或前沿技术1", "新兴技术2"]
+  }
+}
+
+要求：
+1. 仔细阅读每个来源的技术相关信息
+2. 分析产品的整体架构特点（如：微服务、云原生、分布式等）
+3. 列出使用的核心技术栈（前端框架、后端语言、数据库、云服务等）
+4. 识别采用的新兴或前沿技术
+5. 说明技术的使用场景和优势
+6. 按技术重要性和出现频率排序`;
+
+  try {
+    const result = await generateText(prompt, undefined, {
+      temperature: 0.3,
+      maxTokens: 4000,
+      role: 'analyzer',
+    });
+
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const techAnalysis = {
+        architecture: parsed.techAnalysis?.architecture || [],
+        techStack: parsed.techAnalysis?.techStack || [],
+        emergingTech: parsed.techAnalysis?.emergingTech || [],
+      };
+
+      const issues: string[] = [];
+      if (techAnalysis.techStack.length < 3) issues.push('技术栈信息不足');
+      if (techAnalysis.architecture.length < 2) issues.push('架构分析不足');
+
+      const quality = (techAnalysis.techStack.length >= 3 ? 30 : 0) +
+                      (techAnalysis.architecture.length >= 2 ? 30 : 0) +
+                      (techAnalysis.emergingTech.length >= 1 ? 20 : 0) +
+                      20; // 基础分
+
+      return {
+        data: { techAnalysis },
+        quality,
+        issues,
+        supplementalQueries: issues.length > 0 ? [{
+          id: 'sq-tech-1',
+          query: `${projectTitle} 技术架构 技术选型 核心能力`,
+          purpose: '补充技术架构信息',
+          dimension: '技术架构',
+          priority: 1,
+          hints: '请详细描述产品的技术架构、核心能力和技术选型理由',
+        }] : [],
+      };
+    }
+  } catch (error) {
+    console.error('技术分析失败:', error);
+  }
+
+  return {
+    data: { techAnalysis: { architecture: [], techStack: [], emergingTech: [] } },
+    quality: 20,
+    issues: ['技术分析失败'],
+    supplementalQueries: [{
+      id: 'sq-tech-1',
+      query: `${projectTitle} 技术架构 技术栈`,
+      purpose: '搜索技术信息',
+      dimension: '技术架构',
+      priority: 1,
+    }],
+  };
+}
+
+/**
+ * 步骤5: 收集使用场景和案例
+ * 直接使用原始内容进行分析
+ */
+async function analyzeUseCasesStep(
+  summary: ComprehensiveSummary,
+  projectTitle: string
+): Promise<AnalysisStepResult<UseCasesStepData>> {
+  const config = getLLMConfig();
+  const hasApiKey = !!config.apiKey;
+
+  const rawInsights = summary.rawInsights;
+
+  // 无 API Key 时
+  if (!hasApiKey || rawInsights.length === 0) {
+    const useCases: string[] = [];
+    return {
+      data: { useCases },
+      quality: 30,
+      issues: ['无使用场景数据'],
+      supplementalQueries: [{
+        id: 'sq-usecase-1',
+        query: `${projectTitle} 使用场景 应用案例 典型方案`,
+        purpose: '搜索使用场景和案例',
+        dimension: '使用场景与用户案例',
+        priority: 1,
+        hints: '请提供产品的典型使用场景和应用案例',
+      }],
+    };
+  }
+
+  // 直接使用原始内容进行分析
+  const contentContext = rawInsights
+    .slice(0, 15)
+    .map((r, i) => `[来源${i + 1}] ${r.source}\n标题: ${r.title}\n内容: ${r.content.substring(0, 800)}`)
+    .join('\n\n');
+
+  const prompt = `请根据以下原始内容，分析产品的使用场景和用户案例。
+
+【研究主题】
+${projectTitle}
+
+【原始内容来源】
+${contentContext}
+
+【任务】
+请进行详细的使用场景分析，返回 JSON 格式：
+
+{
+  "useCases": [
+    "使用场景1：详细描述用户如何使用产品解决实际问题",
+    "使用场景2：说明具体的应用场景和解决方案",
+    "使用场景3：描述用户类型和使用情境"
+  ],
+  "analysis": "使用场景分析总结，包括主要用户群体和典型使用模式"
+}
+
+要求：
+1. 仔细阅读每个来源中提到的使用场景
+2. 识别不同类型的用户及其使用需求
+3. 分析产品如何满足这些使用场景
+4. 描述具体的使用案例和实际效果
+5. 至少收集 5 个使用场景，每个场景至少30字描述`;
+
+  try {
+    const result = await generateText(prompt, undefined, {
+      temperature: 0.3,
+      maxTokens: 3000,
+      role: 'analyzer',
+    });
+
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const useCases = (parsed.useCases || []).filter((u: string) => u && u.length > 20);
+
+      const issues: string[] = [];
+      if (useCases.length < 5) issues.push('使用场景数量不足');
+
+      const quality = (useCases.length >= 5 ? 40 : 0) +
+                      (useCases.length >= 8 ? 20 : 0) +
+                      (parsed.analysis && parsed.analysis.length > 50 ? 20 : 0) +
+                      20; // 基础分
+
+      return {
+        data: { useCases },
+        quality,
+        issues,
+        supplementalQueries: useCases.length < 5 ? [{
+          id: 'sq-usecase-1',
+          query: `${projectTitle} 应用场景 典型案例 使用方式`,
+          purpose: '补充使用场景',
+          dimension: '使用场景与用户案例',
+          priority: 1,
+          hints: '请提供具体的使用场景和实际案例',
+        }] : [],
+      };
+    }
+  } catch (error) {
+    console.error('使用场景分析失败:', error);
+  }
+
+  return {
+    data: { useCases: [] },
+    quality: 20,
+    issues: ['使用场景分析失败'],
+    supplementalQueries: [{
+      id: 'sq-usecase-1',
+      query: `${projectTitle} 使用场景 典型案例`,
+      purpose: '搜索使用场景',
+      dimension: '使用场景与用户案例',
+      priority: 1,
+    }],
+  };
+}
+
+/**
+ * 步骤6: 生成 SWOT 分析
+ */
+async function generateSWOTStep(
+  features: any[],
+  competitors: any[],
+  marketData: any,
+  projectTitle: string
+): Promise<AnalysisStepResult<{ swot: { strengths: string[]; weaknesses: string[]; opportunities: string[]; threats: string[] } }>> {
+  const config = getLLMConfig();
+  const hasApiKey = !!config.apiKey;
+
+  if (!hasApiKey) {
+    const swot = {
+      strengths: features.slice(0, 3).map(f => f.name),
+      weaknesses: ['信息收集不完整'],
+      opportunities: marketData.trends || [],
+      threats: ['市场竞争加剧'],
+    };
+    return {
+      data: { swot },
+      quality: 40,
+      issues: ['缺少API Key，使用基础SWOT'],
+      supplementalQueries: [],
+    };
+  }
+
+  const prompt = `请基于以下产品调研数据生成 SWOT 分析。
+
+【研究主题】
+${projectTitle}
+
+【功能特性】
+${features.slice(0, 10).map(f => `- ${f.name}: ${f.description || '无描述'}`).join('\n') || '无'}
+
+【竞品信息】
+${competitors.slice(0, 5).map(c => `- ${c.name}: ${c.description || '无描述'}`).join('\n') || '无'}
+
+【市场数据】
+- 市场规模: ${marketData.marketSize || '未知'}
+- 增长率: ${marketData.growthRate || '未知'}
+- 主要趋势: ${(marketData.trends || []).join(', ') || '未知'}
+
+【任务】
+请生成详细的 SWOT 分析，返回 JSON 格式：
+
+{
+  "swot": {
+    "strengths": ["优势1", "优势2", "优势3"],
+    "weaknesses": ["劣势1", "劣势2", "劣势3"],
+    "opportunities": ["机会1", "机会2", "机会3"],
+    "threats": ["威胁1", "威胁2", "威胁3"]
+  },
+  "analysis": "SWOT分析总结（100字以上）"
+}
+
+要求：
+1. 每个维度至少列出 3 个条目
+2. 每个条目需要具体且有分析价值
+3. 结合功能、竞品和市场数据综合分析
+4. 每个条目至少 20 字`;
+
+  try {
+    const result = await generateText(prompt, undefined, {
+      temperature: 0.4,
+      maxTokens: 3000,
+      role: 'analyzer',
+    });
+
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const swot = parsed.swot || {};
+
+      // Validate
+      const issues: string[] = [];
+      const totalItems = (swot.strengths?.length || 0) + (swot.weaknesses?.length || 0) +
+                        (swot.opportunities?.length || 0) + (swot.threats?.length || 0);
+
+      if (totalItems < 8) issues.push('SWOT分析不够完整');
+
+      return {
+        data: { swot },
+        quality: totalItems >= 12 ? 85 : (totalItems >= 8 ? 70 : 50),
+        issues,
+        supplementalQueries: totalItems < 8 ? [{
+          id: 'sq-swot-1',
+          query: `${projectTitle} 优势 劣势 机会 威胁 SWOT分析`,
+          purpose: '补充SWOT分析',
+          dimension: 'SWOT分析',
+          priority: 2,
+          hints: '请提供更详细的优势、劣势、机会和威胁分析',
+        }] : [],
+      };
+    }
+  } catch (error) {
+    console.error('SWOT分析失败:', error);
+  }
+
+  return {
+    data: {
+      swot: {
+        strengths: features.slice(0, 3).map(f => f.name),
+        weaknesses: ['信息收集不完整'],
+        opportunities: marketData.trends || [],
+        threats: [],
+      },
+    },
+    quality: 30,
+    issues: ['SWOT分析失败'],
+    supplementalQueries: [],
+  };
+}
+
+/**
+ * 步骤7: 识别机会和风险
+ */
+async function analyzeOpportunitiesRisksStep(
+  swot: any,
+  marketData: any,
+  projectTitle: string
+): Promise<AnalysisStepResult<{ opportunities: string[]; risks: string[] }>> {
+  const config = getLLMConfig();
+  const hasApiKey = !!config.apiKey;
+
+  if (!hasApiKey) {
+    return {
+      data: {
+        opportunities: swot.opportunities || [],
+        risks: swot.threats || ['市场竞争风险'],
+      },
+      quality: 50,
+      issues: ['缺少API Key，使用基础分析'],
+      supplementalQueries: [],
+    };
+  }
+
+  const prompt = `请基于 SWOT 分析识别市场机会和潜在风险。
+
+【研究主题】
+${projectTitle}
+
+【SWOT分析结果】
+- 优势: ${(swot.strengths || []).join('; ')}
+- 劣势: ${(swot.weaknesses || []).join('; ')}
+- 机会: ${(swot.opportunities || []).join('; ')}
+- 威胁: ${(swot.threats || []).join('; ')}
+
+【市场趋势】
+${(marketData.trends || []).join('\n- ') || '无'}
+
+【任务】
+请深入分析机会和风险，返回 JSON 格式：
+
+{
+  "opportunities": [
+    "机会1（详细描述，至少40字）",
+    "机会2（详细描述，至少40字）",
+    "机会3（详细描述，至少40字）"
+  ],
+  "risks": [
+    "风险1（详细描述，至少40字）",
+    "风险2（详细描述，至少40字）",
+    "风险3（详细描述，至少40字）"
+  ],
+  "analysis": "机会与风险分析总结（150字以上）"
+}
+
+要求：
+1. 机会需要结合优势和趋势，具有前瞻性
+2. 风险需要结合劣势和威胁，具有预警性
+3. 每个机会和风险需要有具体场景和原因说明
+4. 至少 3 个机会和 3 个风险`;
+
+  try {
+    const result = await generateText(prompt, undefined, {
+      temperature: 0.4,
+      maxTokens: 3000,
+      role: 'analyzer',
+    });
+
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const opportunities = (parsed.opportunities || []).filter((o: string) => o && o.length > 30);
+      const risks = (parsed.risks || []).filter((r: string) => r && r.length > 30);
+
+      const issues: string[] = [];
+      if (opportunities.length < 3) issues.push('机会分析不足');
+      if (risks.length < 3) issues.push('风险分析不足');
+
+      return {
+        data: { opportunities, risks },
+        quality: (opportunities.length >= 3 ? 40 : 0) + (risks.length >= 3 ? 40 : 0) + 20,
+        issues,
+        supplementalQueries: issues.length > 0 ? [{
+          id: 'sq-or-1',
+          query: `${projectTitle} 市场机会 发展前景 风险挑战`,
+          purpose: '补充机会和风险分析',
+          dimension: '机会与风险',
+          priority: 2,
+          hints: '请提供详细的市场机会和潜在风险分析',
+        }] : [],
+      };
+    }
+  } catch (error) {
+    console.error('机会风险分析失败:', error);
+  }
+
+  return {
+    data: {
+      opportunities: swot.opportunities || [],
+      risks: swot.threats || ['市场竞争风险'],
+    },
+    quality: 30,
+    issues: ['机会风险分析失败'],
+    supplementalQueries: [],
+  };
+}
+
+/**
+ * 步骤8: 生成建议
+ */
+async function generateRecommendationsStep(
+  swot: any,
+  opportunities: string[],
+  risks: string[],
+  projectTitle: string
+): Promise<AnalysisStepResult<{ recommendations: string[] }>> {
+  const config = getLLMConfig();
+  const hasApiKey = !!config.apiKey;
+
+  if (!hasApiKey) {
+    return {
+      data: {
+        recommendations: [
+          '建议1: 持续关注市场趋势变化',
+          '建议2: 加强技术研发投入',
+          '建议3: 拓展市场份额',
+        ],
+      },
+      quality: 40,
+      issues: ['缺少API Key，使用基础建议'],
+      supplementalQueries: [],
+    };
+  }
+
+  const prompt = `请基于以下分析结果生成具体可行的建议。
+
+【研究主题】
+${projectTitle}
+
+【SWOT分析】
+- 优势: ${(swot.strengths || []).slice(0, 3).join('; ')}
+- 劣势: ${(swot.weaknesses || []).slice(0, 3).join('; ')}
+- 机会: ${(swot.opportunities || []).slice(0, 3).join('; ')}
+- 威胁: ${(swot.threats || []).slice(0, 3).join('; ')}
+
+【主要机会】
+${opportunities.slice(0, 3).join('\n- ') || '无'}
+
+【主要风险】
+${risks.slice(0, 3).join('\n- ') || '无'}
+
+【任务】
+请生成具体可行的建议，返回 JSON 格式：
+
+{
+  "recommendations": [
+    "建议1（详细描述，至少50字，包含具体行动建议）",
+    "建议2（详细描述，至少50字，包含具体行动建议）",
+    "建议3（详细描述，至少50字，包含具体行动建议）",
+    "建议4（详细描述，至少50字，包含具体行动建议）",
+    "建议5（详细描述，至少50字，包含具体行动建议）"
+  ],
+  "analysis": "建议总结（100字以上）"
+}
+
+要求：
+1. 建议需要结合机会和风险，具有可操作性
+2. 每个建议需要有具体的行动步骤
+3. 建议需要考虑资源投入和时间规划
+4. 至少 5 条建议`;
+
+  try {
+    const result = await generateText(prompt, undefined, {
+      temperature: 0.4,
+      maxTokens: 3000,
+      role: 'analyzer',
+    });
+
+    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const recommendations = (parsed.recommendations || []).filter((r: string) => r && r.length > 40);
+
+      const issues: string[] = [];
+      if (recommendations.length < 5) issues.push('建议数量不足');
+
+      return {
+        data: { recommendations },
+        quality: recommendations.length >= 5 ? 85 : 60,
+        issues,
+        supplementalQueries: recommendations.length < 5 ? [{
+          id: 'sq-rec-1',
+          query: `${projectTitle} 发展建议 战略规划 行动方案`,
+          purpose: '补充建议',
+          dimension: '建议',
+          priority: 2,
+          hints: '请提供具体可行的发展建议和行动方案',
+        }] : [],
+      };
+    }
+  } catch (error) {
+    console.error('建议生成失败:', error);
+  }
+
+  return {
+    data: {
+      recommendations: [
+        '建议持续关注市场变化，把握发展机遇',
+        '建议加强技术研发，提升核心竞争力',
+        '建议拓展用户群体，扩大市场份额',
+      ],
+    },
+    quality: 30,
+    issues: ['建议生成失败'],
+    supplementalQueries: [],
+  };
+}
+
+/**
+ * 主函数: 多步骤深度分析
+ * 逐步完成分析，支持在每一步进行数据补充
+ */
+async function multiStepAnalyze(
+  summary: ComprehensiveSummary,
+  projectTitle: string,
+  searchResults: SearchResult[],
+  plan: SearchPlan | undefined,
+  onProgress: (step: number, stepName: string, progress: number, message: string) => void
+): Promise<DeepAnalysis> {
+  let finalAnalysis: DeepAnalysis = {
+    features: [],
+    competitors: [],
+    swot: { strengths: [], weaknesses: [], opportunities: [], threats: [] },
+    marketData: { marketSize: '', growthRate: '', keyPlayers: [], trends: [], segments: [] },
+    techAnalysis: { architecture: [], techStack: [], emergingTech: [] },
+    userInsights: { personas: [], painPoints: [], requirements: [] },
+    opportunities: [],
+    risks: [],
+    recommendations: [],
+    confidenceScore: 50,
+  };
+
+  const STEPS: Array<{
+    name: string;
+    fn: (s: ComprehensiveSummary, projectTitle: string) => Promise<AnalysisStepResult<any>>;
+  }> = [
+    { name: '功能分析', fn: analyzeFeaturesStep },
+    { name: '竞品分析', fn: analyzeCompetitorsStep },
+    { name: '市场分析', fn: analyzeMarketStep },
+    { name: '技术分析', fn: analyzeTechStackStep },
+    { name: '使用场景', fn: analyzeUseCasesStep },
+  ];
+
+  let currentSummary = summary;
+
+  // 执行前5个分析步骤
+  for (let i = 0; i < STEPS.length; i++) {
+    onProgress(i + 1, STEPS[i].name, 0, `正在进行${STEPS[i].name}...`);
+
+    const result = await STEPS[i].fn(currentSummary, projectTitle);
+
+    onProgress(i + 1, STEPS[i].name, 50, `${STEPS[i].name}完成，质量:${result.quality}%`);
+
+    // 如果发现问题且有补充查询，执行补充搜索
+    if (result.issues.length > 0 && result.supplementalQueries.length > 0) {
+      console.log(`[MultiStep] ${STEPS[i].name} 发现问题: ${result.issues.join(', ')}，执行补充搜索`);
+
+      // 执行补充查询
+      for (const query of result.supplementalQueries) {
+        try {
+          const sourceManager = getDataSourceManager();
+          const newResults = await sourceManager.searchAll(query.query, 5);
+          if (newResults.length > 0) {
+            // 爬取完整内容
+            const enrichedResults = await enrichResultsWithCrawl4AI(newResults);
+            // 汇总新结果
+            const newSummaries = await summarizeSingleResults(enrichedResults, projectTitle);
+            // 合并到当前摘要
+            currentSummary = await mergeSummaries(currentSummary, newSummaries);
+            console.log(`[MultiStep] 补充搜索完成，新增 ${newResults.length} 条结果`);
+          }
+        } catch (e) {
+          console.error(`[MultiStep] 补充搜索失败:`, e);
+        }
+      }
+
+      // 重新执行分析
+      onProgress(i + 1, STEPS[i].name, 80, `正在重新分析...`);
+      const retryResult = await STEPS[i].fn(currentSummary, projectTitle);
+      result.data = retryResult.data;
+      result.quality = retryResult.quality;
+    }
+
+    // 保存步骤结果
+    const stepProgress = ((i + 1) / STEPS.length) * 50;
+    onProgress(i + 1, STEPS[i].name, 100, `${STEPS[i].name}完成，质量:${result.quality}%`);
+
+    // 合并结果到最终分析（使用类型断言）
+    const data = result.data as FeaturesStepData & CompetitorsStepData & MarketStepData & TechStepData & UseCasesStepData;
+    if (data.features) finalAnalysis.features = data.features;
+    if (data.competitors) finalAnalysis.competitors = data.competitors;
+    if (data.marketData) finalAnalysis.marketData = data.marketData;
+    if (data.techAnalysis) finalAnalysis.techAnalysis = data.techAnalysis;
+    if (data.useCases) {
+      finalAnalysis.userInsights = {
+        personas: [],
+        painPoints: [],
+        requirements: data.useCases,
+      };
+    }
+  }
+
+  // 步骤6: SWOT 分析
+  onProgress(6, 'SWOT分析', 0, '正在进行SWOT分析...');
+  const swotResult = await generateSWOTStep(
+    finalAnalysis.features,
+    finalAnalysis.competitors,
+    finalAnalysis.marketData,
+    projectTitle
+  );
+  finalAnalysis.swot = swotResult.data.swot;
+  onProgress(6, 'SWOT分析', 100, `SWOT分析完成，质量:${swotResult.quality}%`);
+
+  // 步骤7: 机会与风险
+  onProgress(7, '机会与风险', 0, '正在分析机会与风险...');
+  const orResult = await analyzeOpportunitiesRisksStep(
+    finalAnalysis.swot,
+    finalAnalysis.marketData,
+    projectTitle
+  );
+  finalAnalysis.opportunities = orResult.data.opportunities;
+  finalAnalysis.risks = orResult.data.risks;
+  onProgress(7, '机会与风险', 100, `机会与风险分析完成，质量:${orResult.quality}%`);
+
+  // 步骤8: 建议
+  onProgress(8, '建议生成', 0, '正在生成建议...');
+  const recResult = await generateRecommendationsStep(
+    finalAnalysis.swot,
+    finalAnalysis.opportunities,
+    finalAnalysis.risks,
+    projectTitle
+  );
+  finalAnalysis.recommendations = recResult.data.recommendations;
+  onProgress(8, '建议生成', 100, `建议生成完成，质量:${recResult.quality}%`);
+
+  // 计算总体置信度
+  const overallQuality = (
+    (finalAnalysis.features.length >= 5 ? 20 : 0) +
+    (finalAnalysis.competitors.length >= 3 ? 15 : 0) +
+    (finalAnalysis.marketData.marketSize ? 15 : 0) +
+    (finalAnalysis.techAnalysis.techStack.length >= 3 ? 10 : 0) +
+    (finalAnalysis.userInsights.requirements.length >= 5 ? 10 : 0) +
+    (finalAnalysis.swot.strengths.length >= 2 ? 5 : 0) +
+    (finalAnalysis.opportunities.length >= 2 ? 10 : 0) +
+    (finalAnalysis.risks.length >= 2 ? 5 : 0) +
+    (finalAnalysis.recommendations.length >= 3 ? 10 : 0)
+  );
+  finalAnalysis.confidenceScore = overallQuality;
+
+  return finalAnalysis;
+}
+
+/**
+ * 辅助函数: 合并两个摘要
+ */
+async function mergeSummaries(
+  summary1: ComprehensiveSummary,
+  summary2: ComprehensiveSummary
+): Promise<ComprehensiveSummary> {
+  // 合并去重
+  const allFeatures = [...new Set([...summary1.allFeatures, ...summary2.allFeatures])];
+  const allCompetitors = [...new Set([...summary1.allCompetitors, ...summary2.allCompetitors])];
+  const allTechStack = [...new Set([...summary1.allTechStack, ...summary2.allTechStack])];
+  const allUseCases = [...new Set([...summary1.allUseCases, ...summary2.allUseCases])];
+  const allMarketInsights = [...new Set([...summary1.marketInsights, ...summary2.marketInsights])];
+  const allKeyFindings = [...new Set([...summary1.keyFindings, ...summary2.keyFindings])];
+  const allSourcesUsed = [...new Set([...summary1.sourcesUsed, ...summary2.sourcesUsed])];
+  const rawInsights = [...summary1.rawInsights, ...summary2.rawInsights];
+
+  return {
+    productOverview: summary1.productOverview || summary2.productOverview || '',
+    coreThemes: [...new Set([...summary1.coreThemes, ...summary2.coreThemes])],
+    allFeatures,
+    allCompetitors,
+    allTechStack,
+    allUseCases,
+    marketInsights: allMarketInsights,
+    dataGaps: [...new Set([...summary1.dataGaps, ...summary2.dataGaps])],
+    sourcesUsed: allSourcesUsed,
+    keyFindings: allKeyFindings,
+    rawInsights,
+    summaryQuality: {
+      completeness: Math.min(100, (summary1.summaryQuality?.completeness || 0) + (summary2.summaryQuality?.completeness || 0)),
+      reliability: Math.max(summary1.summaryQuality?.reliability || 0, summary2.summaryQuality?.reliability || 0),
+      depth: Math.max(summary1.summaryQuality?.depth || 0, summary2.summaryQuality?.depth || 0),
+    },
+  };
+}
+
+/**
+ * 辅助函数: 汇总单个结果（用于补充搜索）
+ */
+async function summarizeSingleResults(
+  results: SearchResult[],
+  projectTitle: string
+): Promise<ComprehensiveSummary> {
+  const config = getLLMConfig();
+  const hasApiKey = !!config.apiKey;
+
+  const allFeatures = new Set<string>();
+  const allCompetitors = new Set<string>();
+  const allTechStack = new Set<string>();
+  const allUseCases = new Set<string>();
+  const marketInsights: string[] = [];
+  const keyFindings: string[] = [];
+  const rawInsights: IndividualSummary[] = [];
+  const sourcesUsed: string[] = [];
+
+  for (const result of results) {
+    const summary = await summarizeSingleResult(result, projectTitle, hasApiKey);
+    summary.features.forEach(f => allFeatures.add(f));
+    summary.competitors.forEach(c => allCompetitors.add(c));
+    summary.techStack.forEach(t => allTechStack.add(t));
+    summary.useCases.forEach(u => allUseCases.add(u));
+    if (summary.marketInfo) marketInsights.push(summary.marketInfo);
+    keyFindings.push(...summary.keyPoints.slice(0, 2));
+    rawInsights.push(summary);
+    if (result.source && !sourcesUsed.includes(result.source)) {
+      sourcesUsed.push(result.source);
+    }
+  }
+
+  return {
+    productOverview: '',
+    coreThemes: [],
+    allFeatures: Array.from(allFeatures),
+    allCompetitors: Array.from(allCompetitors),
+    allTechStack: Array.from(allTechStack),
+    allUseCases: Array.from(allUseCases),
+    marketInsights,
+    dataGaps: [],
+    sourcesUsed,
+    keyFindings: [...new Set(keyFindings)],
+    rawInsights,
+    summaryQuality: {
+      completeness: 50,
+      reliability: 60,
+      depth: 40,
+    },
+  };
+}
+
 /**
  * 节点6: 数据质量检查（动态阈值）
  */
@@ -1213,20 +2757,26 @@ async function checkDataQuality(
   }
 
   // 评估各维度覆盖率
-  const coverage: Record<string, boolean> = {
-    features: (analysis.features?.length || 0) >= thresholds.minFeatures,
-    competitors: (analysis.competitors?.length || 0) >= thresholds.minCompetitors,
-    useCases: (summary.allUseCases?.length || 0) >= thresholds.minUseCases,
-    technology: (analysis.techAnalysis?.techStack?.length || 0) >= thresholds.minTechStack,
-    market: !!analysis.marketData?.marketSize || !!analysis.marketData?.growthRate,
+  const featuresCount = analysis.features?.length || 0;
+  const competitorsCount = analysis.competitors?.length || 0;
+  const useCasesCount = summary.allUseCases?.length || 0;
+  const techStackCount = analysis.techAnalysis?.techStack?.length || 0;
+  const hasMarketData = !!analysis.marketData?.marketSize || !!analysis.marketData?.growthRate;
+
+  const coverage: Record<string, number> = {
+    features: Math.min(1, featuresCount / thresholds.minFeatures),
+    competitors: Math.min(1, competitorsCount / thresholds.minCompetitors),
+    useCases: Math.min(1, useCasesCount / thresholds.minUseCases),
+    technology: Math.min(1, techStackCount / thresholds.minTechStack),
+    market: hasMarketData ? 1 : 0,
   };
 
   // 评分
-  score += coverage.features ? 25 : Math.min(25, (analysis.features?.length || 0) * 8);
-  score += coverage.competitors ? 20 : Math.min(20, (analysis.competitors?.length || 0) * 8);
-  score += coverage.useCases ? 20 : Math.min(20, (summary.allUseCases?.length || 0) * 5);
-  score += coverage.technology ? 15 : Math.min(15, (analysis.techAnalysis?.techStack?.length || 0) * 5);
-  score += coverage.market ? 20 : 0;
+  score += coverage.features * 25;
+  score += coverage.competitors * 20;
+  score += coverage.useCases * 20;
+  score += coverage.technology * 15;
+  score += coverage.market * 20;
 
   // 数据质量评分调整
   if (summary.summaryQuality) {
@@ -1246,16 +2796,16 @@ async function checkDataQuality(
   }
 
   // 检查各维度
-  if (!coverage.features) {
-    issues.push(`功能信息不足 (${analysis.features?.length || 0}/${thresholds.minFeatures})`);
+  if (coverage.features < 1) {
+    issues.push(`功能信息不足 (${featuresCount}/${thresholds.minFeatures})`);
     suggestions.push('搜索产品核心功能和特性');
   }
-  if (!coverage.competitors) {
-    issues.push(`竞品信息不足 (${analysis.competitors?.length || 0}/${thresholds.minCompetitors})`);
+  if (coverage.competitors < 1) {
+    issues.push(`竞品信息不足 (${competitorsCount}/${thresholds.minCompetitors})`);
     suggestions.push('搜索竞争对手和替代产品');
   }
-  if (!coverage.useCases) {
-    issues.push(`使用案例不足 (${summary.allUseCases?.length || 0}/${thresholds.minUseCases})`);
+  if (coverage.useCases < 1) {
+    issues.push(`使用案例不足 (${useCasesCount}/${thresholds.minUseCases})`);
     suggestions.push('搜索实际应用案例和客户故事');
   }
 
@@ -1547,11 +3097,11 @@ export async function runResearchAgent(
     limitations: [],
   }));
 
-  let plan: SearchPlan | null = taskData.researchPlan;
-  let allSummaries: IndividualSummary[] = taskData.individualSummaries;
-  let comprehensiveSummary: ComprehensiveSummary | null = taskData.comprehensiveSummary;
-  let analysis: DeepAnalysis | null = taskData.deepAnalysis;
-  let dataQuality: DataQualityCheck = taskData.dataQuality;
+  let plan: SearchPlan | null = taskData.researchPlan as SearchPlan | null;
+  let allSummaries: IndividualSummary[] = taskData.individualSummaries as IndividualSummary[];
+  let comprehensiveSummary: ComprehensiveSummary | null = taskData.comprehensiveSummary as ComprehensiveSummary | null;
+  let analysis: DeepAnalysis | null = taskData.deepAnalysis as DeepAnalysis | null;
+  let dataQuality: DataQualityCheck = taskData.dataQuality as unknown as DataQualityCheck;
   let startIteration = taskData.iterationsUsed;
 
   console.log(`[TaskPersistence] Restored ${searchResults.length} search results from checkpoint`);
@@ -1604,7 +3154,7 @@ export async function runResearchAgent(
     if (!plan) continue;
 
     // 节点2: 执行搜索
-    const newResults = await executeWebResearch(plan, searchResults);
+    const newResults = await executeWebResearch(title, plan, searchResults);
     searchResults = [...searchResults, ...newResults];
     console.log(`Total search results: ${searchResults.length}`);
     updateProgress(projectId, Math.round(baseProgress + 10), `已获取 ${searchResults.length} 条搜索结果，正在汇总...`);
@@ -1645,7 +3195,13 @@ export async function runResearchAgent(
     });
 
     // 更新数据源统计
-    taskData.sourceStats = calculateSourceStats(taskData.searchResults);
+    taskData.sourceStats = calculateSourceStats(
+      taskData.searchResults.map(r => ({
+        source: r.source,
+        sourceType: r.sourceType,
+        contentLength: r.content?.length || 0,
+      }))
+    );
 
     // 保存 Crawl4AI 爬取记录
     taskData.crawl4aiResults = searchResults
@@ -1666,19 +3222,28 @@ export async function runResearchAgent(
     const summarizeResult = await summarizeResults(searchResults, title);
     allSummaries = summarizeResult.individualSummaries;
     comprehensiveSummary = summarizeResult.comprehensiveSummary;
-    updateProgress(projectId, Math.round(baseProgress + 20), `已完成 ${allSummaries.length} 条结果摘要，正在深度分析...`);
+    updateProgress(projectId, Math.round(baseProgress + 20), `已完成 ${allSummaries.length} 条结果摘要，正在多步骤深度分析...`);
 
     // 保存汇总结果
-    taskData.individualSummaries = allSummaries;
-    taskData.comprehensiveSummary = comprehensiveSummary;
+    taskData.individualSummaries = allSummaries as any;
+    taskData.comprehensiveSummary = comprehensiveSummary as any;
     saveTaskData(taskData);
 
-    // 节点4: 深度分析
-    analysis = await analyzeData(comprehensiveSummary, title);
-    updateProgress(projectId, Math.round(baseProgress + 30), '深度分析完成，正在检查数据质量...');
+    // 节点4: 多步骤深度分析
+    analysis = await multiStepAnalyze(
+      comprehensiveSummary,
+      title,
+      searchResults,
+      plan || undefined,
+      (step, stepName, progress, message) => {
+        const overallProgress = Math.round(baseProgress + 30 + (progress * 0.15));
+        updateProgress(projectId, overallProgress, `[${step}/8] ${message}`);
+      }
+    );
+    updateProgress(projectId, Math.round(baseProgress + 45), '深度分析完成，正在检查数据质量...');
 
     // 保存分析结果
-    taskData.deepAnalysis = analysis;
+    taskData.deepAnalysis = analysis as any;
     saveTaskData(taskData);
 
     // 节点5: 数据质量检查
@@ -1688,7 +3253,7 @@ export async function runResearchAgent(
       console.log(`Issues: ${dataQuality.issues.join(', ') || 'None'}`);
 
       // 保存质量检查结果
-      taskData.dataQuality = dataQuality;
+      taskData.dataQuality = dataQuality as any;
       taskData.iterationsUsed = iteration + 1;
       taskData.totalSearches = searchResults.length;
       saveTaskData(taskData);

@@ -116,7 +116,7 @@ export default function SettingsPage() {
   } | null>(null);
   // 每个模型的详细配置（API Key 等）
   const [modelConfigs, setModelConfigs] = useState<{
-    [role: string]: { apiKey?: string; baseUrl?: string; enabled: boolean };
+    [role: string]: { model?: string; apiKey?: string; baseUrl?: string; enabled: boolean };
   }>({});
   const [expandedModel, setExpandedModel] = useState<string | null>(null);
   const [modelRolesSaving, setModelRolesSaving] = useState(false);
@@ -1009,8 +1009,8 @@ function ModelRoleConfig({
   color: string;
   selectedModel: string;
   onModelChange: (model: string) => void;
-  config: { apiKey?: string; baseUrl?: string; enabled: boolean };
-  onConfigChange: (config: { apiKey?: string; baseUrl?: string; enabled: boolean }) => void;
+  config: { model?: string; apiKey?: string; baseUrl?: string; enabled: boolean };
+  onConfigChange: (config: { model?: string; apiKey?: string; baseUrl?: string; enabled: boolean }) => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
   onSave: () => void;

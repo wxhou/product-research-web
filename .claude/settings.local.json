@@ -39,7 +39,8 @@
       "mcp__chrome-devtools__list_console_messages",
       "Bash(jq:*)",
       "Bash(python:*)",
-      "mcp__thinking__sequentialthinking"
+      "mcp__thinking__sequentialthinking",
+      "Bash(python3:*)"
     ]
   }
 }

@@ -940,7 +940,8 @@ class Crawl4AIService implements SearchService {
     const config = this.getConfig();
     if (!config.enabled) return [];
 
-    const timeout = options?.timeout || 30000;
+    // 批量爬取使用更长的超时（60秒）
+    const timeout = options?.timeout || 60000;
 
     // 解析 DuckDuckGo 重定向链接
     const realUrls: string[] = [];
@@ -998,18 +999,33 @@ class Crawl4AIService implements SearchService {
       if (data.results && Array.isArray(data.results) && data.results.length > 0) {
         console.log(`[Crawl4AI] Processing ${data.results.length} results...`);
         const timestamp = new Date().toISOString();
+
+        // 构建 URL 映射（重定向 URL -> 真实 URL）
+        const urlMapping: Map<string, string> = new Map();
+        for (const url of realUrls) {
+          const realUrl = this.extractRealUrl(url);
+          if (realUrl !== url) {
+            urlMapping.set(realUrl, url); // 真实 URL -> 重定向 URL
+          }
+        }
+
         return data.results.map((result: any) => {
           const enrichedContent = this.extractMarkdownContent(result).substring(0, 5000);
           const resultUrl = result.url || 'Unknown';
+
+          // 查找对应的重定向 URL（用于获取原始内容）
+          const redirectUrl = urlMapping.get(resultUrl) || resultUrl;
+          const originalContent = originalContents?.get(redirectUrl) || '';
+
           return {
             title: result.title || resultUrl,
-            url: resultUrl,
+            url: resultUrl,  // Crawl4AI 返回的真实 URL
             content: enrichedContent,
             source: 'crawl4ai' as const,
             publishedAt: result.published_at,
             // 保存爬取信息
             crawl4aiContent: {
-              original: originalContents?.get(resultUrl) || '',
+              original: originalContent,
               enriched: enrichedContent,
               timestamp,
               contentLength: enrichedContent.length,
@@ -1020,8 +1036,9 @@ class Crawl4AIService implements SearchService {
 
       return [];
     } catch (error) {
-      console.error('[Crawl4AI] Batch crawl error:', error);
-      return [];
+      console.error('[Crawl4AI] Batch crawl error, falling back to legacy method:', error);
+      // 降级到逐个爬取
+      return this.crawlMultipleLegacy(realUrls, { timeout: 30000, markdown: options?.markdown });
     }
   }
 
@@ -1093,11 +1110,11 @@ interface SearchService {
 export class DataSourceManager {
   private services: Map<DataSourceType, SearchService> = new Map();
   private enabledSources: Set<DataSourceType> = new Set([
-    // 全部免费数据源默认启用
+    // 全部免费数据源默认启用（已移除 github，因为其搜索结果噪音大）
     'rss-hackernews', 'rss-techcrunch', 'rss-theverge', 'rss-wired', 'rss-producthunt',
     'rss-googlenews', 'rss-mittechreview',
     'rss-cnblogs', 'rss-juejin',
-    'duckduckgo', 'github', 'devto', 'reddit', 'hackernews-api', 'v2ex',
+    'duckduckgo', 'devto', 'reddit', 'hackernews-api', 'v2ex',
     // crawl4ai 不在这里默认启用，由数据库配置控制
   ]);
 
