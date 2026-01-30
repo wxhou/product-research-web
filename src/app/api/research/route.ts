@@ -4,6 +4,8 @@ import { getDataSourceManager, type SearchResult } from '@/lib/datasources';
 import { analyzeSearchResults, generateFullReport, type AnalysisResult } from '@/lib/analysis';
 import { generateText, getLLMConfig, PRODUCT_ANALYST_PROMPT } from '@/lib/llm';
 import { createResearchTask, getUserActiveTaskCount, getProjectLogs } from '@/lib/taskQueue';
+import { MarkdownStateManager } from '@/lib/research-agent/graph/markdown-state';
+import type { ProgressDetail } from '@/lib/research-agent/types';
 
 // 获取当前用户信息
 function getCurrentUser(request: NextRequest): { id: string; username: string; role: string } | null {
@@ -91,7 +93,7 @@ async function analyzeWithLLM(results: SearchResult[], projectTitle: string) {
 
   const summary = results.slice(0, 10).map(r => ({
     title: r.title,
-    content: r.content.substring(0, 500),
+    content: (r.content || '').substring(0, 500),
   }));
 
   const prompt = `请分析以下产品调研资料，总结关键功能特性、竞争对手、SWOT分析和市场机会。
@@ -133,7 +135,7 @@ async function identifyCompetitorsFromResults(results: SearchResult[], projectTi
 
   for (const result of results) {
     const title = result.title.toLowerCase();
-    const content = result.content.toLowerCase();
+    const content = (result.content || '').toLowerCase();
 
     // 提取可能的公司名/产品名（这里用简单规则，实际应使用 NLP）
     const patterns = [
@@ -429,6 +431,38 @@ export async function GET(request: NextRequest) {
   // 获取项目日志
   const logs = getProjectLogs(projectId, 30);
 
+  // 获取详细进度信息（从状态文件读取）
+  let progressDetail: ProgressDetail | null = null;
+  try {
+    const stateManager = new MarkdownStateManager({
+      stateDir: 'task-data',
+    });
+    const state = await stateManager.readState(projectId);
+    if (state?.progressDetail) {
+      progressDetail = state.progressDetail as ProgressDetail;
+    } else {
+      // 从状态构造默认进度详情
+      progressDetail = {
+        stage: project.status || 'pending',
+        step: project.progress_message || '等待开始',
+        totalItems: 10,
+        completedItems: Math.round((project.progress || 0) / 10),
+        currentItem: '',
+        percentage: project.progress || 0,
+      };
+    }
+  } catch {
+    // 使用默认进度
+    progressDetail = {
+      stage: project.status || 'pending',
+      step: project.progress_message || '等待开始',
+      totalItems: 10,
+      completedItems: Math.round((project.progress || 0) / 10),
+      currentItem: '',
+      percentage: project.progress || 0,
+    };
+  }
+
   return NextResponse.json({
     success: true,
     data: {
@@ -445,6 +479,7 @@ export async function GET(request: NextRequest) {
         error: task.error,
       } : null,
       logs: logs,
+      progressDetail: progressDetail,
     },
   });
 }

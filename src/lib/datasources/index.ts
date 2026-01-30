@@ -8,13 +8,31 @@
  * 4. GitHub API - 搜索开源项目
  */
 
+export interface Crawl4AIResult {
+  original: string;
+  enriched: string;
+  timestamp: string;
+  contentLength: number;
+}
+
 export interface SearchResult {
+  // 基础字段
   title: string;
   url: string;
-  content: string;
   source: string;
   publishedAt?: string;
   author?: string;
+  // 扩展字段（研究Agent使用）- content 在搜索时可能为空
+  id?: string;
+  quality?: number;
+  crawled?: boolean;
+  queryId?: string;
+  dimension?: string;
+  crawledAt?: string;
+  contentHash?: string;
+  content?: string;
+  // 爬虫扩展字段
+  crawl4aiContent?: Crawl4AIResult;
 }
 
 export interface SearchOptions {

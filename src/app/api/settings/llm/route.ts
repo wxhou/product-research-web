@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { settingsDb } from '@/lib/db';
+import { getLLMConfig } from '@/lib/llm';
 
 interface LLMConfig {
   provider: string;
@@ -24,16 +25,25 @@ export async function GET() {
       }
     }
 
+    // 返回数据库配置或默认配置
+    if (config) {
+      return NextResponse.json({
+        success: true,
+        data: config,
+      });
+    }
+
     // 返回默认配置
+    const defaultConfig = getLLMConfig();
     return NextResponse.json({
       success: true,
-      data: config || {
-        provider: 'modelscope',
-        baseUrl: null,
-        apiKey: null,
-        modelName: 'deepseek-ai/DeepSeek-R1-0528',
-        temperature: 0.7,
-        timeout: 120,
+      data: {
+        provider: defaultConfig.provider,
+        baseUrl: defaultConfig.baseUrl,
+        apiKey: defaultConfig.apiKey,
+        modelName: defaultConfig.modelName,
+        temperature: defaultConfig.temperature,
+        timeout: defaultConfig.timeout,
       },
     });
   } catch (error) {
@@ -52,7 +62,7 @@ export async function POST(request: NextRequest) {
     const { provider, baseUrl, apiKey, modelName, temperature, timeout } = body as Partial<LLMConfig>;
 
     // 验证输入
-    const validProviders = ['openai', 'azure', 'anthropic', 'deepseek', 'gemini', 'moonshot', 'modelscope', 'siliconflow', 'compatible'];
+    const validProviders = ['openai', 'azure', 'anthropic', 'deepseek', 'gemini', 'moonshot', 'modelscope', 'siliconflow', 'compatible', 'ollama'];
     if (provider && !validProviders.includes(provider)) {
       return NextResponse.json(
         { success: false, error: 'Invalid provider' },
@@ -67,9 +77,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (timeout !== undefined && (isNaN(timeout) || timeout < 30 || timeout > 300)) {
+    if (timeout !== undefined && (isNaN(timeout) || timeout < 30 || timeout > 600)) {
       return NextResponse.json(
-        { success: false, error: 'Timeout must be between 30 and 300 seconds' },
+        { success: false, error: 'Timeout must be between 30 and 600 seconds' },
         { status: 400 }
       );
     }
@@ -86,14 +96,16 @@ export async function POST(request: NextRequest) {
     }
 
     const config: LLMConfig = {
-      provider: provider || existingConfig?.provider || 'openai',
-      // 只有兼容模式才保存自定义 baseUrl，否则设为 null
-      baseUrl: (provider === 'compatible' || provider === 'azure') ? (baseUrl || existingConfig?.baseUrl || null) : null,
+      provider: provider || existingConfig?.provider || getLLMConfig().provider,
+      // Ollama 或兼容模式保存自定义 baseUrl
+      baseUrl: (provider === 'ollama' || provider === 'compatible' || provider === 'azure')
+        ? (baseUrl || existingConfig?.baseUrl || getLLMConfig().baseUrl)
+        : null,
       apiKey: apiKey || null,
       // 保留现有模型名称或使用默认值
-      modelName: modelName || existingConfig?.modelName || 'deepseek-ai/DeepSeek-R1-0528',
-      temperature: temperature || existingConfig?.temperature || 0.7,
-      timeout: timeout || existingConfig?.timeout || 120,
+      modelName: modelName || existingConfig?.modelName || getLLMConfig().modelName,
+      temperature: temperature || existingConfig?.temperature || getLLMConfig().temperature,
+      timeout: timeout || existingConfig?.timeout || getLLMConfig().timeout,
     };
 
     settingsDb.set.run({

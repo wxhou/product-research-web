@@ -258,18 +258,19 @@ function extractCompetitors(results: SearchResult[]): CompetitorInfo[] {
         const name = matches[1].trim();
         // 使用新的验证函数
         if (isValidCompetitorName(name, result.source)) {
+          const resultContent = result.content || '';
           if (!competitors.has(name)) {
             competitors.set(name, {
               name,
               url: result.url,
               features: [],
-              description: result.content.substring(0, 200),
+              description: resultContent.substring(0, 200),
               industry: detectIndustry(content),
             });
           } else {
             const existing = competitors.get(name)!;
-            if (!existing.description && result.content) {
-              existing.description = result.content.substring(0, 200);
+            if (!existing.description && resultContent) {
+              existing.description = resultContent.substring(0, 200);
             }
           }
         }
@@ -346,8 +347,9 @@ function detectIndustry(content: string): string {
  */
 function extractMarketData(results: SearchResult[]): MarketData {
   // 从搜索结果中提取市场数据
-  const marketSizeMatch = results[0]?.content.match(/(\d+[\d,]*\s*(?:亿|千万|百万)?\s*(?:美元|人民币|元)?)/);
-  const growthRateMatch = results[0]?.content.match(/(\d+[\d,]*%?)\s*(?:增长|增速|增长率)/);
+  const firstResult = results[0]?.content || '';
+  const marketSizeMatch = firstResult.match(/(\d+[\d,]*\s*(?:亿|千万|百万)?\s*(?:美元|人民币|元)?)/);
+  const growthRateMatch = firstResult.match(/(\d+[\d,]*%?)\s*(?:增长|增速|增长率)/);
 
   return {
     marketSize: marketSizeMatch ? marketSizeMatch[1] : '数十亿级',

@@ -1841,6 +1841,255 @@ html[data-theme="dark"] .theme-toggle .moon-icon {
   text-align: center;
 }
 
+/* Research Progress Component */
+.research-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Simple Progress */
+.research-progress-simple {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.research-progress-simple .progress-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0;
+}
+
+.research-progress-simple .progress-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  color: var(--info);
+}
+
+.research-progress-simple .progress-info {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.research-progress-simple .progress-message {
+  font-size: 0.875rem;
+  color: var(--foreground);
+}
+
+.research-progress-simple .progress-percentage {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--foreground-muted);
+}
+
+/* Stage Indicator */
+.stage-indicator {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0;
+}
+
+.stage-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  position: relative;
+  flex: 1;
+}
+
+.stage-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  transition: all var(--transition-base);
+}
+
+.stage-icon.pending {
+  border: 2px dashed var(--border);
+}
+
+.stage-icon.active {
+  box-shadow: 0 0 0 3px var(--info-light);
+}
+
+.stage-number {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.stage-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--foreground-muted);
+  transition: color var(--transition-fast);
+}
+
+.stage-label.completed,
+.stage-label.active {
+  color: var(--foreground);
+}
+
+.stage-connector {
+  position: absolute;
+  top: 16px;
+  left: calc(50% + 16px);
+  width: calc(100% + 32px);
+  height: 2px;
+  z-index: -1;
+}
+
+.stage-connector.pending {
+  background: var(--border);
+}
+
+.stage-connector.completed {
+  background: var(--success);
+}
+
+.stage-connector.active {
+  background: linear-gradient(90deg, var(--success) 0%, var(--border) 100%);
+}
+
+/* Overall Progress */
+.overall-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.progress-labels {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.progress-labels .progress-percentage {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.estimated-time {
+  font-size: 0.75rem;
+  color: var(--foreground-muted);
+}
+
+/* Current Stage Detail */
+.current-stage-detail {
+  background: var(--background-subtle);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  border: 1px solid var(--border);
+}
+
+.stage-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.stage-icon-small {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+}
+
+.stage-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.stage-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.stage-step {
+  font-size: 0.75rem;
+  color: var(--foreground-muted);
+}
+
+.stage-progress-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.progress-stats {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.progress-stats .stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+.progress-stats .stat-value {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.progress-stats .stat-label {
+  font-size: 0.625rem;
+  color: var(--foreground-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.stat-divider {
+  color: var(--foreground-muted);
+  font-size: 1rem;
+  margin: 0 0.25rem;
+}
+
+.current-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--foreground-muted);
+  padding: 0.5rem;
+  background: var(--background);
+  border-radius: var(--radius-sm);
+}
+
+/* Animations */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s ease-in-out infinite;
+}
+
 /* Stats Grid */
 .stats-grid {
   display: grid;

@@ -62,6 +62,35 @@ export default function ReportViewer({ reportId }: { reportId: string }) {
   const processMermaidBlocks = useCallback(async () => {
     if (!containerRef.current) return;
 
+    // Pre-process: convert invalid mermaid syntax to valid
+    const preprocessor = (content: string): string => {
+      // Convert barChart to xychart-beta (using [\s\S] instead of . with s flag for compatibility)
+      return content.replace(
+        /```mermaid[\s\S]*?barChart[\s\S]*?title\s+["']([^"']+)["'][\s\S]*?x-axis\s+([^\n]+)[\s\S]*?y-axis\s+([^\n]+)[\s\S]*?series\s+([^\n]+)[\s\S]*?([\d\s,\[\]]+)[\s\S]*?```/g,
+        (match, title, xaxis, yaxis, series, data) => {
+          return `\`\`\`mermaid
+xychart-beta
+    title "${title.trim()}"
+    x-axis ${xaxis.trim()}
+    y-axis "${yaxis.trim()}"
+    bar ${data.trim()}
+\`\`\``;
+        }
+      );
+    };
+
+    // Apply preprocessor to the container content
+    const codeBlocks = containerRef.current.querySelectorAll('code');
+    codeBlocks.forEach((codeEl) => {
+      if (codeEl.className.includes('mermaid') || codeEl.className.includes('language-mermaid')) {
+        const originalText = codeEl.textContent || '';
+        const convertedText = preprocessor(originalText);
+        if (originalText !== convertedText) {
+          codeEl.textContent = convertedText;
+        }
+      }
+    });
+
     // Find all mermaid code blocks in various formats
     const mermaidBlocks: { element: HTMLElement; code: string }[] = [];
 

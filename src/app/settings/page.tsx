@@ -6,6 +6,16 @@ import { useAuth } from '@/contexts/AuthContext';
 
 // 可用模型列表
 const MODEL_OPTIONS: Record<string, Array<{ value: string; label: string; desc?: string }>> = {
+  ollama: [
+    { value: 'llama3.2', label: 'Llama 3.2', desc: 'Meta 最新开源模型' },
+    { value: 'llama3.1', label: 'Llama 3.1', desc: 'Meta 8B 指令微调' },
+    { value: 'qwen2.5', label: 'Qwen 2.5', desc: '阿里千问本地版' },
+    { value: 'qwen2.5-coder', label: 'Qwen 2.5 Coder', desc: '代码专用' },
+    { value: 'deepseek-r1', label: 'DeepSeek R1', desc: '推理模型本地版' },
+    { value: 'mistral', label: 'Mistral', desc: '欧洲开源模型' },
+    { value: 'codellama', label: 'CodeLlama', desc: '代码专用' },
+    { value: 'phi4', label: 'Phi-4', desc: '微软小模型' },
+  ],
   deepseek: [
     { value: 'deepseek-ai/DeepSeek-R1', label: 'DeepSeek-R1', desc: '推理模型，适合复杂分析' },
     { value: 'deepseek-ai/DeepSeek-V3', label: 'DeepSeek-V3', desc: '通用对话，性价比高' },
@@ -92,8 +102,7 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  // 默认使用 ModelScope + DeepSeek-R1-0528
-  const [selectedProvider, setSelectedProvider] = useState('modelscope');
+  const [selectedProvider, setSelectedProvider] = useState('ollama');
   const [llmConfig, setLlmConfig] = useState<{
     provider: string;
     modelName: string;
@@ -107,20 +116,6 @@ export default function SettingsPage() {
   } | null>(null);
   const [crawl4aiSaving, setCrawl4aiSaving] = useState(false);
   const [crawl4aiMessage, setCrawl4aiMessage] = useState<string | null>(null);
-
-  // 多模型配置
-  const [modelRoles, setModelRoles] = useState<{
-    analyzer: string;
-    extractor: string;
-    reporter: string;
-  } | null>(null);
-  // 每个模型的详细配置（API Key 等）
-  const [modelConfigs, setModelConfigs] = useState<{
-    [role: string]: { model?: string; apiKey?: string; baseUrl?: string; enabled: boolean };
-  }>({});
-  const [expandedModel, setExpandedModel] = useState<string | null>(null);
-  const [modelRolesSaving, setModelRolesSaving] = useState(false);
-  const [modelRolesMessage, setModelRolesMessage] = useState<string | null>(null);
 
   const router = useRouter();
   const { isAdmin, isAuthenticated, loading: authLoading } = useAuth();
@@ -138,7 +133,6 @@ export default function SettingsPage() {
       fetchDataSources();
       fetchLLMConfig();
       fetchCrawl4AIConfig();
-      fetchModelRoles();
     }
   }, [isAuthenticated]);
 
@@ -181,89 +175,6 @@ export default function SettingsPage() {
       setCrawl4aiMessage('保存失败，请检查网络连接');
     } finally {
       setCrawl4aiSaving(false);
-    }
-  };
-
-  // 加载多模型配置
-  const fetchModelRoles = async () => {
-    try {
-      const res = await fetch('/api/settings/model-roles');
-      const data = await res.json();
-      if (data.success && data.data) {
-        const config = data.data;
-        // 设置模型角色选择
-        setModelRoles({
-          analyzer: config.analyzer?.model || '',
-          extractor: config.extractor?.model || '',
-          reporter: config.reporter?.model || '',
-        });
-        // 设置每个模型的详细配置
-        setModelConfigs({
-          analyzer: {
-            model: config.analyzer?.model || '',
-            baseUrl: config.analyzer?.baseUrl || '',
-            apiKey: config.analyzer?.apiKey || '',
-            enabled: config.analyzer?.enabled || false,
-          },
-          extractor: {
-            model: config.extractor?.model || '',
-            baseUrl: config.extractor?.baseUrl || '',
-            apiKey: config.extractor?.apiKey || '',
-            enabled: config.extractor?.enabled || false,
-          },
-          reporter: {
-            model: config.reporter?.model || '',
-            baseUrl: config.reporter?.baseUrl || '',
-            apiKey: config.reporter?.apiKey || '',
-            enabled: config.reporter?.enabled || false,
-          },
-        });
-      }
-    } catch (e) {
-      console.error('Failed to load model roles config:', e);
-    }
-  };
-
-  // 保存多模型配置
-  const saveModelRoles = async () => {
-    setModelRolesSaving(true);
-    setModelRolesMessage(null);
-    try {
-      const config = {
-        analyzer: modelConfigs.analyzer || { model: '', enabled: false },
-        extractor: modelConfigs.extractor || { model: '', enabled: false },
-        reporter: modelConfigs.reporter || { model: '', enabled: false },
-      };
-      // 确保每个配置都有 model 字段
-      if (modelRoles?.analyzer) {
-        config.analyzer.model = modelRoles.analyzer;
-        config.analyzer.enabled = !!modelRoles.analyzer;
-      }
-      if (modelRoles?.extractor) {
-        config.extractor.model = modelRoles.extractor;
-        config.extractor.enabled = !!modelRoles.extractor;
-      }
-      if (modelRoles?.reporter) {
-        config.reporter.model = modelRoles.reporter;
-        config.reporter.enabled = !!modelRoles.reporter;
-      }
-
-      const res = await fetch('/api/settings/model-roles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setModelRolesMessage('配置已保存');
-        setTimeout(() => setModelRolesMessage(null), 2000);
-      } else {
-        setModelRolesMessage('保存失败: ' + data.error);
-      }
-    } catch (e) {
-      setModelRolesMessage('保存失败，请检查网络连接');
-    } finally {
-      setModelRolesSaving(false);
     }
   };
 
@@ -533,6 +444,7 @@ export default function SettingsPage() {
               value={selectedProvider}
               onChange={(e) => setSelectedProvider(e.target.value)}
             >
+              <option value="ollama">Ollama (本地)</option>
               <option value="modelscope">ModelScope (魔搭)</option>
               <option value="deepseek">DeepSeek (Chat)</option>
               <option value="moonshot">Moonshot (Kimi)</option>
@@ -541,7 +453,7 @@ export default function SettingsPage() {
             </select>
           </div>
 
-          <div className="preference-item" id="base-url-item" style={{ display: selectedProvider === 'compatible' ? 'flex' : 'none' }}>
+          <div className="preference-item" id="base-url-item" style={{ display: selectedProvider === 'ollama' || selectedProvider === 'compatible' ? 'flex' : 'none' }}>
             <div className="preference-info">
               <div className="preference-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -897,206 +809,6 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
-
-      {/* 多模型配置区域 */}
-      <section className="settings-section">
-        <div className="section-header">
-          <div className="section-info">
-            <h2>AI 模型配置</h2>
-            <p>为不同任务配置专用模型，提升调研效率和质量</p>
-          </div>
-          <p style={{ fontSize: '13px', color: 'var(--foreground-muted)', margin: 0 }}>
-            支持配置独立的 API 地址和 Key
-          </p>
-        </div>
-
-        <div className="preference-card card">
-          {/* 快速分析模型 */}
-          <ModelRoleConfig
-            role="analyzer"
-            title="快速分析模型"
-            description="用于判断内容质量、决定是否需要爬取（建议用小模型，省成本）"
-            icon={
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-              </svg>
-            }
-            color="var(--success)"
-            selectedModel={modelRoles?.analyzer || ''}
-            onModelChange={(model) => setModelRoles({ ...modelRoles!, analyzer: model })}
-            config={modelConfigs.analyzer || { enabled: false }}
-            onConfigChange={(config) => setModelConfigs({ ...modelConfigs, analyzer: config })}
-            isExpanded={expandedModel === 'analyzer'}
-            onToggleExpand={() => setExpandedModel(expandedModel === 'analyzer' ? null : 'analyzer')}
-            onSave={saveModelRoles}
-          />
-
-          {/* 深度提取模型 */}
-          <ModelRoleConfig
-            role="extractor"
-            title="深度提取模型"
-            description="用于从搜索结果中提取功能、竞品、市场等信息（建议用大模型）"
-            icon={
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="11" cy="11" r="8" />
-                <path d="M21 21l-4.35-4.35" />
-                <path d="M11 8v6M8 11h6" />
-              </svg>
-            }
-            color="var(--accent)"
-            selectedModel={modelRoles?.extractor || ''}
-            onModelChange={(model) => setModelRoles({ ...modelRoles!, extractor: model })}
-            config={modelConfigs.extractor || { enabled: false }}
-            onConfigChange={(config) => setModelConfigs({ ...modelConfigs, extractor: config })}
-            isExpanded={expandedModel === 'extractor'}
-            onToggleExpand={() => setExpandedModel(expandedModel === 'extractor' ? null : 'extractor')}
-            onSave={saveModelRoles}
-          />
-
-          {/* 报告生成模型 */}
-          <ModelRoleConfig
-            role="reporter"
-            title="报告生成模型"
-            description="用于生成最终的研究报告（建议用推理模型）"
-            icon={
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-                <polyline points="10 9 9 9 8 9" />
-              </svg>
-            }
-            color="var(--primary)"
-            selectedModel={modelRoles?.reporter || ''}
-            onModelChange={(model) => setModelRoles({ ...modelRoles!, reporter: model })}
-            config={modelConfigs.reporter || { enabled: false }}
-            onConfigChange={(config) => setModelConfigs({ ...modelConfigs, reporter: config })}
-            isExpanded={expandedModel === 'reporter'}
-            onToggleExpand={() => setExpandedModel(expandedModel === 'reporter' ? null : 'reporter')}
-            onSave={saveModelRoles}
-          />
-
-          {/* 状态提示 */}
-          <p style={{ fontSize: '13px', color: modelRolesMessage?.includes('成功') ? 'var(--success)' : 'var(--foreground-muted)', margin: 0, marginTop: '8px' }}>
-            {modelRolesMessage || '修改后自动保存'}
-          </p>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-// 模型角色配置组件
-function ModelRoleConfig({
-  role,
-  title,
-  description,
-  icon,
-  color,
-  selectedModel,
-  onModelChange,
-  config,
-  onConfigChange,
-  isExpanded,
-  onToggleExpand,
-  onSave,
-}: {
-  role: string;
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  color: string;
-  selectedModel: string;
-  onModelChange: (model: string) => void;
-  config: { model?: string; apiKey?: string; baseUrl?: string; enabled: boolean };
-  onConfigChange: (config: { model?: string; apiKey?: string; baseUrl?: string; enabled: boolean }) => void;
-  isExpanded: boolean;
-  onToggleExpand: () => void;
-  onSave: () => void;
-}) {
-  return (
-    <div className="model-role-config" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '16px', marginBottom: '16px' }}>
-      <div className="preference-item" onClick={onToggleExpand} style={{ cursor: 'pointer' }}>
-        <div className="preference-info">
-          <div className="preference-icon" style={{ color }}>
-            {icon}
-          </div>
-          <div>
-            <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {title}
-              {selectedModel && <span className="model-badge">{selectedModel.split('/').pop()}</span>}
-            </h3>
-            <p>{description}</p>
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {isExpanded ? (
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="18 15 12 9 6 15" />
-            </svg>
-          ) : (
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          )}
-        </div>
-      </div>
-
-      {isExpanded && (
-        <div className="model-config-panel" style={{ marginTop: '16px', marginLeft: '44px', padding: '16px', background: 'var(--background-subtle)', borderRadius: '8px' }}>
-          {/* 模型选择 */}
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: 'var(--foreground-muted)' }}>
-              模型名称
-            </label>
-            <input
-              type="text"
-              className="input"
-              placeholder="例如: deepseek-ai/DeepSeek-R1 或 gpt-4o"
-              value={selectedModel}
-              onChange={(e) => onModelChange(e.target.value)}
-              style={{ width: '100%' }}
-            />
-            <p style={{ fontSize: '12px', color: 'var(--foreground-muted)', marginTop: '6px', margin: 0 }}>
-              常用模型: DeepSeek-R1, DeepSeek-V3, Qwen2.5-72B-Instruct, QwQ-32B
-            </p>
-          </div>
-
-          {/* API 地址 */}
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: 'var(--foreground-muted)' }}>
-              API 地址（可选，使用主模型配置可留空）
-            </label>
-            <input
-              type="text"
-              className="input"
-              placeholder="https://api.example.com/v1"
-              value={config.baseUrl || ''}
-              onChange={(e) => onConfigChange({ ...config, baseUrl: e.target.value })}
-            />
-          </div>
-
-          {/* API Key */}
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ display: 'block', fontSize: '13px', marginBottom: '6px', color: 'var(--foreground-muted)' }}>
-              API Key（可选，使用主模型配置可留空）
-            </label>
-            <input
-              type="password"
-              className="input"
-              placeholder="sk-..."
-              value={config.apiKey || ''}
-              onChange={(e) => onConfigChange({ ...config, apiKey: e.target.value })}
-            />
-          </div>
-
-          {/* 保存按钮 */}
-          <button className="btn btn-primary" onClick={onSave}>
-            保存配置
-          </button>
-        </div>
-      )}
     </div>
   );
 }

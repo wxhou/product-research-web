@@ -40,7 +40,16 @@
       "Bash(jq:*)",
       "Bash(python:*)",
       "mcp__thinking__sequentialthinking",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(openspec list)",
+      "Bash(openspec list:*)",
+      "Bash(openspec validate:*)",
+      "Bash(openspec show:*)",
+      "Bash(npx openspec validate:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(npm test:*)",
+      "Bash(find:*)"
     ]
   }
 }

@@ -40,12 +40,12 @@ export interface LLMResponse {
 
 // 默认配置
 const DEFAULT_CONFIG: LLMConfig = {
-  provider: 'openai',
-  baseUrl: null,
+  provider: 'ollama',
+  baseUrl: 'http://localhost:11434/v1',
   apiKey: null,
-  modelName: 'gpt-4',
+  modelName: '',
   temperature: 0.7,
-  timeout: 120,
+  timeout: 300,
 };
 
 /**
@@ -194,46 +194,22 @@ export async function callLLM(
     modelName?: string;
     temperature?: number;
     maxTokens?: number;
-    role?: 'analyzer' | 'extractor' | 'reporter'; // 模型角色
   }
 ): Promise<LLMResponse> {
   const config = getLLMConfig();
-  const role = options?.role;
+  const modelName = options?.modelName || config.modelName || 'gpt-4';
+  const temperature = options?.temperature ?? config.temperature ?? 0.7;
+  const timeout = config.timeout * 1000;
 
-  // 如果指定了角色，尝试从模型角色配置中获取自定义配置
-  let modelConfig = config;
-  if (role) {
-    try {
-      const { getModelConfig } = await import('@/lib/model-roles');
-      const roleConfig = getModelConfig(role);
-      if (roleConfig && roleConfig.model && roleConfig.model.trim() !== '') {
-        // 使用角色自定义配置
-        modelConfig = {
-          ...config,
-          modelName: roleConfig.model,
-          baseUrl: roleConfig.baseUrl || config.baseUrl,
-          apiKey: roleConfig.apiKey || config.apiKey,
-        };
-        console.log(`[LLM] Using ${role} config: ${modelConfig.modelName} @ ${modelConfig.baseUrl || 'default'}`);
-      }
-    } catch (e) {
-      console.error(`[LLM] Failed to load config for role '${role}':`, e);
-    }
-  }
-
-  const modelName = options?.modelName || modelConfig.modelName || 'gpt-4';
-  const temperature = options?.temperature ?? modelConfig.temperature ?? 0.7;
-  const timeout = modelConfig.timeout * 1000;
-
-  const baseUrl = getBaseUrl(modelConfig);
-  const headers = getHeaders(modelConfig);
-  const messageFormat = formatMessages(messages, modelConfig.provider);
+  const baseUrl = getBaseUrl(config);
+  const headers = getHeaders(config);
+  const messageFormat = formatMessages(messages, config.provider);
 
   // 替换 Azure 占位符
   let url = baseUrl;
-  if (modelConfig.provider === 'azure') {
+  if (config.provider === 'azure') {
     url = baseUrl
-      .replace('{resource-name}', modelConfig.baseUrl?.split('.')[0] || 'your-resource')
+      .replace('{resource-name}', config.baseUrl?.split('.')[0] || 'your-resource')
       .replace('{deployment-name}', modelName);
   } else {
     url = `${baseUrl}/chat/completions`;
@@ -247,11 +223,11 @@ export async function callLLM(
   };
 
   // Gemini 使用不同端点
-  if (modelConfig.provider === 'gemini') {
+  if (config.provider === 'gemini') {
     url = `${baseUrl}/models/${modelName}:generateContent`;
   }
 
-  console.log(`[LLM] Calling API: provider=${modelConfig.provider}, model=${modelName}, baseUrl=${baseUrl}`);
+  console.log(`[LLM] Calling API: provider=${config.provider}, model=${modelName}, baseUrl=${baseUrl}`);
 
   try {
     const controller = new AbortController();
@@ -279,7 +255,7 @@ export async function callLLM(
 
     const data = await res.json() as Record<string, unknown>;
     console.log(`[LLM] Response data keys:`, Object.keys(data));
-    const response = parseResponse(data, modelConfig.provider);
+    const response = parseResponse(data, config.provider);
     console.log(`[LLM] Parsed response length: ${response.content.length}`);
     console.log(`[LLM] Response preview: ${response.content.substring(0, 200).replace(/\n/g, ' ')}`);
     return response;
@@ -299,7 +275,6 @@ export async function generateText(
     modelName?: string;
     temperature?: number;
     maxTokens?: number;
-    role?: 'analyzer' | 'extractor' | 'reporter';
   }
 ): Promise<string> {
   const messages: LLMMessage[] = [];
@@ -327,11 +302,10 @@ export const PRODUCT_ANALYST_PROMPT = `你是一位专业的产品调研分析�
 4. 识别市场机会和创新方向
 5. 提供技术路线建议
 
-请保持客观、专业的分析视角，使用具体数据支撑你的结论。`;
+图表要求：
+- 使用 Mermaid 语法绘制图表
+- 饼图使用: \`\`\`mermaid\npie\n    title xxx\n    "label" : value\n\`\`\`
+- 条形图使用: \`\`\`mermaid\nxychart-beta\n    title "xxx"\n    x-axis ["label1", "label2", ...]\n    y-axis "数值范围" 0 --> 100\n    bar [value1, value2, ...]\n\`\`\`
+- 技术路线图使用: \`\`\`mermaid\nflowchart TD\n    A[阶段1] --> B[阶段2]\n\`\`\`
 
-export default {
-  getLLMConfig,
-  callLLM,
-  generateText,
-  PRODUCT_ANALYST_PROMPT,
-};
+请保持客观、专业的分析视角，使用具体数据支撑你的结论。`;

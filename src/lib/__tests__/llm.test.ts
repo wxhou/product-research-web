@@ -9,11 +9,18 @@ describe('LLM Constants and Types', () => {
   describe('LLMConfig interface', () => {
     it('should define correct config structure', () => {
       // Test the interface by creating a valid config object
-      const config = {
+      const config: {
+        provider: string;
+        baseUrl: string | null;
+        apiKey: string | null;
+        modelName: string | null;
+        temperature: number;
+        timeout: number;
+      } = {
         provider: 'openai',
-        baseUrl: 'https://api.openai.com/v1' as const | null,
-        apiKey: 'sk-test-key' as const | null,
-        modelName: 'gpt-4' as const | null,
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test-key',
+        modelName: 'gpt-4',
         temperature: 0.7,
         timeout: 120,
       };
@@ -75,7 +82,7 @@ describe('LLM Constants and Types', () => {
     });
 
     it('should support responses without usage data', () => {
-      const response = {
+      const response: { content: string; usage?: { promptTokens: number; completionTokens: number; totalTokens: number } } = {
         content: 'Simple response.',
       };
 

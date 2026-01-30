@@ -1,6 +1,6 @@
 import db, { taskDb, projectDb, searchResultDb, reportDb, researchPhaseDb } from './db';
 import { type SearchResult } from './datasources';
-import { runResearchAgent } from './research-agent';
+import { runResearchAgent, getResearchTaskStatus } from './research-agent';
 
 export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
@@ -212,42 +212,55 @@ export async function processTask(taskId: string): Promise<boolean> {
     reportDb.deleteByProject.run({ project_id: task.project_id });
     researchPhaseDb.deleteByProject.run({ project_id: task.project_id });
 
-    // 使用 Research Agent 执行完整的研究工作流 (LangGraph 风格)
-    const result = await runResearchAgent(
-      task.project_id,
-      task.user_id,
-      project.title,
-      project.description || '',
-      2  // maxIterations
-    );
+    // 解析关键词
+    const keywords = (project.keywords || '').split(',').map(k => k.trim()).filter(Boolean);
 
-    // 保存搜索结果
-    for (const searchResult of result.searchResults) {
-      const searchId = generateId();
-      searchResultDb.create.run({
-        id: searchId,
-        project_id: task.project_id,
-        user_id: task.user_id,
-        source: searchResult.source,
-        query: project.title,
-        url: searchResult.url,
-        title: searchResult.title,
-        content: searchResult.content,
-        raw_data: JSON.stringify(searchResult),
-      });
+    // 使用 Research Agent 执行完整的研究工作流 (LangGraph 风格)
+    const result = await runResearchAgent({
+      projectId: task.project_id,
+      title: project.title,
+      description: project.description || '',
+      keywords,
+      userId: task.user_id,
+      onProgress: (progress, message) => {
+        updateProgress(task.project_id, progress, message);
+      },
+      onComplete: (result) => {
+        console.log(`Research completed for project: ${task.project_id}, success: ${result.success}`);
+      },
+      onError: (error) => {
+        console.error(`Research error for project: ${task.project_id}`, error.message);
+      },
+    });
+
+    // 获取最终状态
+    const status = await getResearchTaskStatus(task.project_id);
+
+    // 获取报告内容（从状态文件读取）
+    let reportContent = '';
+    let dataQualityScore = 0;
+    if (status) {
+      // 报告内容可以从 Markdown 状态文件读取
+      // 这里简化处理，报告已由 Agent 生成并保存
+      dataQualityScore = status.confidenceScore ? status.confidenceScore * 100 : 0;
     }
 
-    // 保存报告
-    const reportId = generateId();
-    reportDb.create.run({
-      id: reportId,
-      project_id: task.project_id,
-      user_id: task.user_id,
-      title: `${project.title} - 产品调研报告`,
-      content: result.report,
-      mermaid_charts: '',
-      used_llm: 1,
-    });
+    // 保存搜索结果（如果 Agent 有返回结果）
+    // 注意：新架构使用 Markdown 文件存储，此处可省略
+
+    // 保存报告（如果成功）
+    if (result.success) {
+      const reportId = generateId();
+      reportDb.create.run({
+        id: reportId,
+        project_id: task.project_id,
+        user_id: task.user_id,
+        title: `${project.title} - 产品调研报告`,
+        content: '', // 报告内容存储在 Markdown 文件中
+        mermaid_charts: '',
+        used_llm: 1,
+      });
+    }
 
     // 完成任务
     taskDb.markCompleted.run({ id: taskId });
@@ -258,12 +271,14 @@ export async function processTask(taskId: string): Promise<boolean> {
       keywords: project.keywords || '',
       status: 'completed',
       progress: 100,
-      progress_message: `调研完成！数据质量评分: ${result.dataQuality.score}/100`,
+      progress_message: result.success
+        ? `调研完成！数据质量评分: ${dataQualityScore}/100`
+        : `调研失败: ${result.error}`,
     });
-    updateProgress(task.project_id, 100, '调研完成！');
+    updateProgress(task.project_id, result.success ? 100 : 0, result.success ? '调研完成！' : `调研失败: ${result.error}`);
 
-    console.log(`Research task completed: ${taskId}, quality score: ${result.dataQuality.score}`);
-    return true;
+    console.log(`Research task completed: ${taskId}, success: ${result.success}, quality score: ${dataQualityScore}`);
+    return result.success;
   } catch (error) {
     console.error('Task failed:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { ResearchProgress } from './ResearchProgress';
 
 interface Project {
   id: string;
@@ -36,6 +37,16 @@ interface TaskStatus {
   error?: string;
 }
 
+interface ProgressDetail {
+  stage: string;
+  step: string;
+  totalItems: number;
+  completedItems: number;
+  currentItem: string;
+  percentage: number;
+  estimatedTimeRemaining?: number;
+}
+
 interface LogEntry {
   timestamp: string;
   level: 'info' | 'warn' | 'error';
@@ -49,6 +60,7 @@ export default function ProjectViewer({ projectId }: { projectId: string }) {
   const [report, setReport] = useState<Report | null>(null);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [task, setTask] = useState<TaskStatus | null>(null);
+  const [progressDetail, setProgressDetail] = useState<ProgressDetail | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [showLogPanel, setShowLogPanel] = useState(false);
@@ -86,6 +98,10 @@ export default function ProjectViewer({ projectId }: { projectId: string }) {
         }
         if (data.data.task) {
           setTask(data.data.task);
+        }
+        // 更新详细进度
+        if (data.data.progressDetail) {
+          setProgressDetail(data.data.progressDetail);
         }
         // 更新日志
         if (data.data.logs && Array.isArray(data.data.logs)) {
@@ -274,24 +290,31 @@ export default function ProjectViewer({ projectId }: { projectId: string }) {
       {/* 调研进度显示 */}
       {isProcessing && (
         <div className="progress-section card">
-          <div className="progress-header">
-            <div className="progress-icon">
-              {project.status === 'pending' ? (
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
-                </svg>
-              ) : (
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
-                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                </svg>
-              )}
+          {/* 使用详细进度组件 */}
+          {progressDetail ? (
+            <ResearchProgress progress={progressDetail} />
+          ) : (
+            /* 兼容旧数据：使用简单进度条 */
+            <div className="progress-header">
+              <div className="progress-icon">
+                {project.status === 'pending' ? (
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <polyline points="12 6 12 12 16 14" />
+                  </svg>
+                ) : (
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                )}
+              </div>
+              <div className="progress-info">
+                <div className="progress-message">{project.progress_message || '准备中...'}</div>
+                <div className="progress-percentage">{project.progress || 0}%</div>
+              </div>
             </div>
-            <div className="progress-info">
-              <div className="progress-message">{project.progress_message || '准备中...'}</div>
-              <div className="progress-percentage">{project.progress || 0}%</div>
-            </div>
-          </div>
+          )}
+          {/* 简单进度条（当有详细进度时也显示） */}
           <div className="progress-bar">
             <div
               className="progress-fill"
