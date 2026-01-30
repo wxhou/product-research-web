@@ -121,16 +121,18 @@ describe('Reporter Worker', () => {
       expect(citation.relevanceScore).toBe(0.85);
     });
 
-    it('should support optional fields', () => {
+    it('should create citation with all fields', () => {
       const citation: Citation = {
         id: 'cite1',
         source: 'duckduckgo',
         title: 'Example',
         url: 'https://example.com',
+        relevanceScore: 0.92,
+        referencedAt: '2024-01-29T10:00:00Z',
       };
 
-      expect(citation.relevanceScore).toBeUndefined();
-      expect(citation.referencedAt).toBeUndefined();
+      expect(citation.relevanceScore).toBe(0.92);
+      expect(citation.referencedAt).toBeDefined();
     });
   });
 

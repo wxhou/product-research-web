@@ -73,7 +73,7 @@ describe('Research Agent Types', () => {
         'devto',
         'reddit',
         'v2ex',
-        'crawl4ai',
+        'mcp-fetch',
       ];
 
       expect(sources).toHaveLength(10);

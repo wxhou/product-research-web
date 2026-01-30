@@ -167,7 +167,7 @@ describe('Planner Worker', () => {
         'devto',
         'reddit',
         'v2ex',
-        'crawl4ai',
+        'mcp-fetch',
       ];
 
       sources.forEach(source => {

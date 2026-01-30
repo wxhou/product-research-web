@@ -2,7 +2,7 @@
  * Searcher Worker Tests
  */
 
-import { describe, it, expect, beforeEach } from '@jest/globals';
+import { describe, it, expect } from '@jest/globals';
 import type { SearchResult, DataSourceType } from '../../research-agent/types';
 
 describe('Searcher Worker', () => {
@@ -60,29 +60,52 @@ describe('Searcher Worker', () => {
       expect(result.crawledAt).toBeDefined();
       expect(result.contentHash).toBeDefined();
     });
-  });
 
-  describe('Search result with crawl4ai content', () => {
-    it('should support crawl4ai extended fields', () => {
-      const result: SearchResult = {
-        id: 'sr1',
-        source: 'crawl4ai' as DataSourceType,
-        title: 'Test',
-        url: 'https://test.com',
-        quality: 9,
-        crawled: true,
-        queryId: 'q1',
-        dimension: 'features',
-        crawl4aiContent: {
-          original: '原始内容...',
-          enriched: '增强后的内容...',
-          timestamp: '2024-01-29T10:00:00Z',
-          contentLength: 5000,
-        },
-      };
+    it('should support all valid data source types', () => {
+      const validSources: DataSourceType[] = [
+        'duckduckgo',
+        'rss-hackernews',
+        'rss-techcrunch',
+        'rss-theverge',
+        'rss-wired',
+        'rss-producthunt',
+        'devto',
+        'reddit',
+        'v2ex',
+        'mcp-fetch',
+      ];
 
-      expect(result.crawl4aiContent).toBeDefined();
-      expect(result.crawl4aiContent?.contentLength).toBe(5000);
+      validSources.forEach(source => {
+        const result: SearchResult = {
+          id: 'test',
+          source: source,
+          title: 'Test',
+          url: 'https://test.com',
+          quality: 5,
+          crawled: false,
+          queryId: 'q1',
+          dimension: 'general',
+        };
+        expect(result.source).toBe(source);
+      });
+    });
+
+    it('should validate dimension values', () => {
+      const validDimensions = ['general', 'features', 'competitors', 'market', 'pricing', 'reviews', 'technical'] as const;
+
+      validDimensions.forEach(dimension => {
+        const result: SearchResult = {
+          id: 'test',
+          source: 'duckduckgo' as DataSourceType,
+          title: 'Test',
+          url: 'https://test.com',
+          quality: 5,
+          crawled: false,
+          queryId: 'q1',
+          dimension,
+        };
+        expect(result.dimension).toBe(dimension);
+      });
     });
   });
 });
