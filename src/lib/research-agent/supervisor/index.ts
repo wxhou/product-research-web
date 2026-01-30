@@ -4,19 +4,16 @@
  * 负责协调各 Worker Agent 的执行
  *
  * 功能：
- * 1. 任务分解和路由
+ * 1. 使用 LLM 进行任务分解和路由
  * 2. 结果合成和质量控制
  * 3. 错误恢复和重试
+ *
+ * 注意：不再使用规则引擎，全部使用 LLM 做路由决策
  */
 
 import type { ResearchState } from '../state';
 import type { AgentName, AnalysisResult } from '../types';
-import {
-  SUPERVISOR_PROMPT,
-  TASK_DECOMPOSITION_PROMPT,
-  QUALITY_ASSESSMENT_PROMPT,
-  RESULT_SYNTHESIS_PROMPT,
-} from '../prompts/supervisor';
+import { SUPERVISOR_PROMPT } from '../prompts/supervisor';
 import { generateText, getLLMConfig } from '../../llm';
 import { updateProgress } from '../progress/tracker';
 import { createCancelCheck } from '../cancellation/handler';
@@ -25,8 +22,6 @@ import { createCancelCheck } from '../cancellation/handler';
  * Supervisor Agent 配置
  */
 export interface SupervisorConfig {
-  /** 是否使用 LLM 做路由决策 */
-  useLLMRouting: boolean;
   /** 最大重试次数 */
   maxRetries: number;
   /** 质量阈值 */
@@ -41,7 +36,6 @@ export interface SupervisorConfig {
 
 /** 默认配置 */
 const DEFAULT_CONFIG: SupervisorConfig = {
-  useLLMRouting: true,
   maxRetries: 3,
   qualityThresholds: {
     minSearchResults: 15,
@@ -93,12 +87,14 @@ export function createSupervisorAgent(config: Partial<SupervisorConfig> = {}) {
 
 /**
  * 主执行函数：监督执行流程
+ *
+ * 全部使用 LLM 做路由决策，不再有规则引擎分支
  */
 async function executeSupervision(
   state: ResearchState,
   config: SupervisorConfig
 ): Promise<SupervisorResult> {
-  const { projectId, status, currentStep } = state;
+  const { projectId, currentStep } = state;
 
   // 创建取消检查
   const isCancelled = createCancelCheck(projectId);
@@ -117,22 +113,10 @@ async function executeSupervision(
     const llmConfig = getLLMConfig();
     const hasApiKey = !!llmConfig.apiKey;
 
-    // 检查是否需要使用 LLM 路由
-    if (!config.useLLMRouting || !hasApiKey) {
-      // 使用规则引擎做决策
-      const decision = ruleBasedDecision(state, config);
-
-      await updateProgress(projectId, {
-        stage: 'supervising',
-        step: '决策完成',
-        totalItems: 5,
-        completedItems: 5,
-        currentItem: decision.nextAgent,
-      });
-
+    if (!hasApiKey) {
       return {
-        success: true,
-        decision,
+        success: false,
+        error: 'LLM 不可用，无法进行路由决策',
       };
     }
 
@@ -161,37 +145,37 @@ async function executeSupervision(
 
 /**
  * 使用 LLM 做路由决策
+ *
+ * 接收完整的 ResearchState，生成下一步操作决策
  */
 async function makeRoutingDecision(
   state: ResearchState,
   config: SupervisorConfig
 ): Promise<SupervisorDecision> {
-  const { status, searchResults, extractedContent, analysis, title } = state;
+  const { status, searchResults, extractedContent, analysis, projectPath, rawFileCount, retryCount = 0 } = state;
+  const maxRetries = state.maxRetries || 3;
 
-  // 准备上下文
-  const context = {
-    currentStage: status,
-    searchResultsCount: searchResults.length,
-    extractedContentCount: extractedContent.length,
-    hasAnalysis: !!analysis,
-    analysisComplete: analysis?.confidenceScore && analysis.confidenceScore >= 0.5,
-    searchQuality: searchResults.filter((r) => r.quality >= 7).length,
-    extractionQuality: extractedContent.filter((e) => e.metadata.qualityScore >= 5).length,
-  };
+  // 构建详细的状态描述
+  const statusDescription = getStatusDescription(status, searchResults.length, extractedContent.length, rawFileCount);
 
   // 构建提示词
   const prompt = `${SUPERVISOR_PROMPT}
 
-当前状态：
-- 当前阶段：${status}
-- 搜索结果数量：${context.searchResultsCount}
-- 已提取内容数量：${context.extractedContentCount}
-- 是否有分析结果：${context.hasAnalysis}
-- 分析置信度：${analysis?.confidenceScore?.toFixed(2) || 'N/A'}
-- 高质量搜索结果：${context.searchQuality}
-- 高质量提取内容：${context.extractionQuality}
+${statusDescription}
 
-请根据当前状态决定下一步操作。`;
+当前状态详情：
+- 当前阶段：${status}
+- 搜索结果数量：${searchResults.length}
+- 已提取内容数量：${extractedContent.length}
+- 原始文件数量：${rawFileCount || 'N/A'}
+- 是否有分析结果：${!!analysis}
+- 分析置信度：${analysis?.confidenceScore?.toFixed(2) || 'N/A'}
+- 识别功能数：${analysis?.features?.length || 0}
+- 识别竞品数：${analysis?.competitors?.length || 0}
+- 已重试次数：${retryCount}/${maxRetries}
+- 质量阈值要求：搜索结果≥${config.qualityThresholds.minSearchResults}, 提取≥${config.qualityThresholds.minExtractions}
+
+请根据当前状态决定下一步操作，确保研究流程完整进行。如果重试次数已达上限，强制完成任务。`;
 
   // 调用 LLM
   const responseText = await generateText(prompt);
@@ -201,8 +185,8 @@ async function makeRoutingDecision(
   try {
     response = JSON.parse(responseText);
   } catch {
-    // 降级到规则引擎
-    return ruleBasedDecision(state, config);
+    // 解析失败时使用默认决策
+    return getDefaultDecision(status, searchResults.length, extractedContent.length, !!analysis, retryCount, maxRetries);
   }
 
   // 验证决策
@@ -210,37 +194,102 @@ async function makeRoutingDecision(
   const validAgents = ['planner', 'searcher', 'extractor', 'analyzer', 'reporter', 'done'];
 
   if (!validAgents.includes(nextAgent)) {
-    return ruleBasedDecision(state, config);
+    return getDefaultDecision(status, searchResults.length, extractedContent.length, !!analysis, retryCount, maxRetries);
   }
-
-  // 如果 shouldContinue 未定义，根据 nextAgent 判断：不是 'done' 就继续
-  const shouldContinue = response.shouldContinue !== undefined 
-    ? Boolean(response.shouldContinue) 
-    : nextAgent !== 'done';
 
   return {
     nextAgent: nextAgent as AgentName | 'done',
-    reason: (response.reason as string) || 'LLM 决策',
+    reason: (response.reason as string) || `${status} → ${nextAgent}`,
     instructions: (response.instructions as string) || '',
-    shouldContinue,
+    shouldContinue: response.shouldContinue !== undefined
+      ? Boolean(response.shouldContinue)
+      : nextAgent !== 'done',
   };
 }
 
 /**
- * 规则引擎路由决策
+ * 获取状态描述
  */
-function ruleBasedDecision(
-  state: ResearchState,
-  config: SupervisorConfig
-): SupervisorDecision {
-  const { status, searchResults, extractedContent, analysis } = state;
+function getStatusDescription(
+  status: string,
+  searchCount: number,
+  extractionCount: number,
+  fileCount: number | undefined
+): string {
+  const descriptions: Record<string, string> = {
+    pending: '任务尚未开始执行',
+    planning: '正在生成研究计划',
+    searching: '正在搜索相关信息',
+    extracting: '正在提取网页内容',
+    analyzing: '正在分析提取的内容',
+    reporting: '正在生成研究报告',
+    completed: '研究任务已完成',
+    failed: '研究任务失败',
+    cancelled: '研究任务已取消',
+  };
 
-  // 根据当前状态决定下一步
+  let desc = descriptions[status] || '未知状态';
+
+  // 添加进度信息
+  if (status === 'searching' && searchCount > 0) {
+    desc += `，已获取 ${searchCount} 条搜索结果`;
+  }
+  if (status === 'extracting' && extractionCount > 0) {
+    desc += `，已提取 ${extractionCount} 个页面`;
+  }
+  if (status === 'extracting' && fileCount) {
+    desc += `，保存了 ${fileCount} 个原始文件`;
+  }
+  if (status === 'analyzing') {
+    desc += '，正在分析文件内容';
+  }
+
+  return desc;
+}
+
+/**
+ * 获取默认决策（当 LLM 解析失败时使用）
+ */
+function getDefaultDecision(
+  status: string,
+  searchCount: number,
+  extractionCount: number,
+  hasAnalysis: boolean,
+  retryCount: number = 0,
+  maxRetries: number = 3
+): SupervisorDecision {
+  // 如果达到最大重试次数，强制完成任务
+  if (retryCount >= maxRetries) {
+    if (status === 'searching' && searchCount > 0) {
+      return {
+        nextAgent: 'extractor',
+        reason: `重试次数达上限 (${retryCount})，已有 ${searchCount} 条搜索结果，继续提取`,
+        instructions: '继续执行，即使数据不理想',
+        shouldContinue: true,
+      };
+    }
+    if (status === 'analyzing' && hasAnalysis) {
+      return {
+        nextAgent: 'reporter',
+        reason: `重试次数达上限 (${retryCount})，分析已完成，生成报告`,
+        instructions: '生成报告，即使分析可能不完整',
+        shouldContinue: true,
+      };
+    }
+    return {
+      nextAgent: 'done',
+      reason: `重试次数达上限 (${retryCount})，任务强制完成`,
+      instructions: '任务完成',
+      shouldContinue: false,
+    };
+  }
+
+  // 基于状态机的确定性决策
   switch (status) {
     case 'pending':
       return {
         nextAgent: 'planner',
-        reason: '任务尚未开始，需要先生成研究计划',
+        reason: '任务尚未开始，需要生成研究计划',
         instructions: '创建详细的研究搜索计划',
         shouldContinue: true,
       };
@@ -254,81 +303,52 @@ function ruleBasedDecision(
       };
 
     case 'searching':
-      // 检查搜索结果是否足够
-      const searchQuality = searchResults.filter((r) => r.quality >= 7).length;
-      if (searchResults.length >= config.qualityThresholds.minSearchResults &&
-          searchQuality >= config.qualityThresholds.minSearchResults * 0.3) {
+      if (searchCount >= 15) {
         return {
           nextAgent: 'extractor',
-          reason: `搜索结果充足 (${searchResults.length} 条)，开始提取内容`,
+          reason: `搜索结果充足 (${searchCount} 条)，开始提取内容`,
           instructions: '爬取高质量搜索结果的内容',
           shouldContinue: true,
         };
-      } else if (searchResults.length > 0) {
-        return {
-          nextAgent: 'extractor',
-          reason: '有搜索结果，开始提取',
-          instructions: '开始提取内容，即使结果不够理想',
-          shouldContinue: true,
-        };
-      } else {
-        return {
-          nextAgent: 'searcher',
-          reason: '搜索结果不足，重新搜索',
-          instructions: '补充更多搜索查询',
-          shouldContinue: true,
-        };
       }
+      return {
+        nextAgent: 'searcher',
+        reason: `搜索结果不足 (${searchCount}/15)，继续搜索 (${retryCount + 1}/${maxRetries})`,
+        instructions: '补充更多搜索查询',
+        shouldContinue: true,
+      };
 
     case 'extracting':
-      // 检查提取结果
-      const extractionQuality = extractedContent.filter(
-        (e) => e.metadata.contentLength > 500
-      ).length;
-      if (extractedContent.length >= config.qualityThresholds.minExtractions &&
-          extractionQuality >= 3) {
+      if (extractionCount >= 5) {
         return {
           nextAgent: 'analyzer',
-          reason: '内容提取充足，开始分析',
+          reason: `内容提取充足 (${extractionCount} 个)，开始分析`,
           instructions: '分析提取的内容，生成竞品分析',
           shouldContinue: true,
         };
-      } else if (extractedContent.length > 0) {
-        return {
-          nextAgent: 'analyzer',
-          reason: '有提取结果，开始分析',
-          instructions: '开始分析，即使内容不够理想',
-          shouldContinue: true,
-        };
-      } else {
-        return {
-          nextAgent: 'extractor',
-          reason: '没有提取到内容，重新提取',
-          instructions: '补充提取更多内容',
-          shouldContinue: true,
-        };
       }
+      return {
+        nextAgent: 'analyzer',
+        reason: '有提取结果，开始分析',
+        instructions: '开始分析，即使内容不够理想',
+        shouldContinue: true,
+      };
 
     case 'analyzing':
-      // 检查分析结果
-      if (analysis &&
-          analysis.features.length >= config.qualityThresholds.minFeatures &&
-          analysis.competitors.length >= config.qualityThresholds.minCompetitors &&
-          analysis.confidenceScore >= 0.5) {
+      if (hasAnalysis) {
         return {
           nextAgent: 'reporter',
           reason: '分析完成，生成报告',
           instructions: '生成完整的研究报告',
           shouldContinue: true,
         };
-      } else {
-        return {
-          nextAgent: 'analyzer',
-          reason: '分析不完整，重新分析',
-          instructions: '补充分析或重新分析',
-          shouldContinue: true,
-        };
       }
+      return {
+        nextAgent: 'analyzer',
+        reason: `分析不完整，重新分析 (${retryCount + 1}/${maxRetries})`,
+        instructions: '补充分析或重新分析',
+        shouldContinue: true,
+      };
 
     case 'reporting':
       return {
@@ -354,15 +374,17 @@ function ruleBasedDecision(
 function assessQuality(
   state: ResearchState,
   config: SupervisorConfig
-): SupervisorDecision & { dataGaps: string[]; score: number; issues: string[] } {
+): SupervisorDecision & { dataGaps: string[]; score: number; issues: string[]; isComplete: boolean } {
   const { searchResults, extractedContent, analysis } = state;
   const issues: string[] = [];
   let score = 100;
+  const dataGaps: string[] = [];
 
   // 搜索结果评估
   const searchCount = searchResults.length;
   if (searchCount < config.qualityThresholds.minSearchResults) {
     issues.push(`搜索结果不足: ${searchCount}/${config.qualityThresholds.minSearchResults}`);
+    dataGaps.push('search_results');
     score -= 20;
   }
 
@@ -370,6 +392,7 @@ function assessQuality(
   const extractionCount = extractedContent.length;
   if (extractionCount < config.qualityThresholds.minExtractions) {
     issues.push(`提取内容不足: ${extractionCount}/${config.qualityThresholds.minExtractions}`);
+    dataGaps.push('extracted_content');
     score -= 15;
   }
 
@@ -380,37 +403,35 @@ function assessQuality(
 
     if (featureCount < config.qualityThresholds.minFeatures) {
       issues.push(`功能分析不足: ${featureCount}/${config.qualityThresholds.minFeatures}`);
+      dataGaps.push('features');
       score -= 15;
     }
 
     if (competitorCount < config.qualityThresholds.minCompetitors) {
       issues.push(`竞品分析不足: ${competitorCount}/${config.qualityThresholds.minCompetitors}`);
+      dataGaps.push('competitors');
       score -= 15;
     }
 
     if (analysis.confidenceScore < 0.5) {
       issues.push(`置信度过低: ${(analysis.confidenceScore * 100).toFixed(0)}%`);
+      dataGaps.push('confidence');
       score -= 10;
     }
   } else {
     issues.push('缺少分析结果');
+    dataGaps.push('analysis');
     score -= 25;
   }
 
-  // 计算数据缺口
-  const dataGaps = [
-    searchCount < config.qualityThresholds.minSearchResults ? '更多搜索结果' : null,
-    extractionCount < config.qualityThresholds.minExtractions ? '更多提取内容' : null,
-    !analysis ? '完整分析' : null,
-    (analysis?.features.length ?? 0) < config.qualityThresholds.minFeatures ? '功能详细分析' : null,
-    (analysis?.competitors.length ?? 0) < config.qualityThresholds.minCompetitors ? '竞品对比分析' : null,
-  ].filter(Boolean) as string[];
+  const isComplete = score >= config.qualityThresholds.completionScore;
 
   return {
-    nextAgent: issues.length === 0 ? 'done' : 'analyzer',
-    reason: issues.length === 0 ? '质量达标' : `发现 ${issues.length} 个问题`,
-    instructions: '',
-    shouldContinue: issues.length > 0,
+    nextAgent: isComplete ? 'reporter' : 'analyzer',
+    reason: isComplete ? '质量评估通过' : '需要更多分析',
+    instructions: isComplete ? '生成报告' : '补充分析',
+    shouldContinue: true,
+    isComplete,
     score: Math.max(0, score),
     issues,
     dataGaps,
@@ -418,80 +439,56 @@ function assessQuality(
 }
 
 /**
- * 合成最终结果
+ * 合成结果
  */
 async function synthesizeResults(
   state: ResearchState,
   config: SupervisorConfig
-): Promise<{ summary: string; quality: string; dataGaps: string[] }> {
-  const { title, searchResults, extractedContent, analysis } = state;
+): Promise<{ success: boolean; summary: string; recommendations: string[] }> {
+  const { analysis, searchResults, extractedContent } = state;
 
-  // 统计信息
-  const searchStats = {
-    total: searchResults.length,
-    highQuality: searchResults.filter((r) => r.quality >= 7).length,
-    sources: [...new Set(searchResults.map((r) => r.source))].length,
-  };
-
-  const extractionSummary = {
-    total: extractedContent.length,
-    avgLength: extractedContent.length > 0
-      ? Math.round(extractedContent.reduce((sum, e) => sum + e.content.length, 0) / extractedContent.length)
-      : 0,
-  };
-
-  // 使用 LLM 合成结果
-  const llmConfig = getLLMConfig();
-  const hasApiKey = !!llmConfig.apiKey;
-
-  if (hasApiKey && analysis) {
-    const prompt = RESULT_SYNTHESIS_PROMPT
-      .replace('{title}', title)
-      .replace('{analysisResult}', JSON.stringify(analysis, null, 2))
-      .replace('{searchStats}', JSON.stringify(searchStats, null, 2))
-      .replace('{extractionSummary}', JSON.stringify(extractionSummary, null, 2));
-
-    const responseText = await generateText(prompt);
-
-    try {
-      const response = JSON.parse(responseText);
-      return {
-        summary: response.summary as string,
-        quality: response.dataQuality as string,
-        dataGaps: (response.dataGaps as string[]) || [],
-      };
-    } catch {
-      // 降级到手动合成
-    }
+  if (!analysis) {
+    return {
+      success: false,
+      summary: '没有可合成的分析结果',
+      recommendations: [],
+    };
   }
 
-  // 手动合成
-  const quality = searchStats.total >= 15 && extractedContent.length >= 5
-    ? '优秀'
-    : searchStats.total >= 10 && extractedContent.length >= 3
-    ? '良好'
-    : searchStats.total >= 5
-    ? '一般'
-    : '不足';
+  const summary = `
+研究主题: ${state.title}
+搜索结果: ${searchResults.length} 条
+提取内容: ${extractedContent.length} 个页面
+识别功能: ${analysis.features.length} 个
+识别竞品: ${analysis.competitors.length} 个
+分析置信度: ${(analysis.confidenceScore * 100).toFixed(0)}%
 
-  const summary = `本次研究共收集 ${searchStats.total} 条搜索结果，从 ${extractionSummary.total} 个页面提取内容，识别出 ${analysis?.features.length || 0} 个核心功能和 ${analysis?.competitors.length || 0} 个竞品。`;
+功能摘要:
+${analysis.features.slice(0, 5).map(f => `- ${f.name}`).join('\n')}
 
-  const dataGaps: string[] = [];
-  if (searchStats.total < 15) dataGaps.push('搜索结果不足');
-  if (extractionSummary.total < 5) dataGaps.push('提取内容不足');
-  if (!analysis) dataGaps.push('缺少深度分析');
+竞品摘要:
+${analysis.competitors.slice(0, 3).map(c => `- ${c.name}: ${c.marketPosition}`).join('\n')}
+`.trim();
 
-  return { summary, quality, dataGaps };
+  const recommendations: string[] = [];
+
+  // 基于 SWOT 生成建议
+  if (analysis.swot.opportunities.length > 0) {
+    recommendations.push(`抓住市场机会: ${analysis.swot.opportunities[0]}`);
+  }
+  if (analysis.swot.strengths.length > 0) {
+    recommendations.push(`发挥优势: ${analysis.swot.strengths[0]}`);
+  }
+  if (analysis.swot.weaknesses.length > 0) {
+    recommendations.push(`改进劣势: ${analysis.swot.weaknesses[0]}`);
+  }
+  if (analysis.swot.threats.length > 0) {
+    recommendations.push(`关注威胁: ${analysis.swot.threats[0]}`);
+  }
+
+  return {
+    success: true,
+    summary,
+    recommendations,
+  };
 }
-
-// ============================================================
-// 导出
-// ============================================================
-
-export {
-  executeSupervision,
-  makeRoutingDecision,
-  ruleBasedDecision,
-  assessQuality,
-  synthesizeResults,
-};

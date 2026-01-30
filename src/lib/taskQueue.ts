@@ -250,7 +250,8 @@ export async function processTask(taskId: string): Promise<boolean> {
     // 保存报告（如果成功）
     if (result.success && reportContent) {
       const reportId = generateId();
-      const reportPath = result.reportPath || `task-data/${task.project_id}-report.md`;
+      // 新路径格式: task-data/project-{id}/report.md
+      const reportPath = result.reportPath || `task-data/project-${task.project_id}/report.md`;
 
       // 保存到数据库
       reportDb.create.run({

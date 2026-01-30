@@ -90,7 +90,6 @@ export interface ResearchTaskExecutor {
 export function createResearchTaskExecutor(config: ResearchTaskConfig): ResearchTaskExecutor {
   const checkpointer = createMemoryCheckpointer();
   const supervisor = createSupervisorAgent({
-    useLLMRouting: true,
     maxRetries: 3,
     qualityThresholds: {
       minSearchResults: 15,
@@ -378,9 +377,11 @@ function createExtractorNode(config: ResearchTaskConfig): (state: ResearchState)
         return {
           status: 'analyzing' as const,
           currentStep: 'analyzer' as AgentName,
-          progress: Math.min(60, 30 + (state.extractedContent.length / 5) * 30),
-          progressMessage: `已提取 ${state.extractedContent.length} 个页面内容`,
+          progress: Math.min(60, 30 + (state.searchResults.length / 15) * 20),
+          progressMessage: `已提取 ${state.searchResults.length} 条搜索结果，保存 ${result.rawFileCount} 个文件到 ${result.projectPath}`,
           extractedContent: result.extractedContent || state.extractedContent,
+          projectPath: result.projectPath,
+          rawFileCount: result.rawFileCount,
           updatedAt: new Date().toISOString(),
         };
       }
@@ -427,8 +428,9 @@ function createAnalyzerNode(config: ResearchTaskConfig): (state: ResearchState) 
           status: 'reporting' as const,
           currentStep: 'reporter' as AgentName,
           progress: Math.min(85, 60 + (result.analysis.confidenceScore * 25)),
-          progressMessage: '分析完成',
+          progressMessage: '分析完成，生成报告中',
           analysis: result.analysis,
+          analysisFiles: result.analysisFiles,
           citations,
           updatedAt: new Date().toISOString(),
         };
@@ -511,7 +513,7 @@ function createSupervisorNode(
       };
     }
 
-    // 根据决策更新状态
+    // 检查是否在同一个状态下循环（需要递增重试次数）
     const statusMap: Record<string, ResearchState['status']> = {
       planner: 'planning',
       searcher: 'searching',
@@ -520,10 +522,14 @@ function createSupervisorNode(
       reporter: 'reporting',
     };
 
+    const nextStatus = statusMap[decision.nextAgent] || 'planning';
+    const isLooping = state.status === nextStatus;
+
     return {
       currentStep: decision.nextAgent as AgentName,
-      status: statusMap[decision.nextAgent] || 'planning',
+      status: nextStatus,
       progressMessage: decision.reason,
+      retryCount: isLooping ? (state.retryCount || 0) + 1 : state.retryCount,
       updatedAt: new Date().toISOString(),
     };
   };

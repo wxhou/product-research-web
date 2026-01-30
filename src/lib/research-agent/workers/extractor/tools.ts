@@ -4,15 +4,15 @@
  * 封装网页内容爬取功能
  */
 
-import { crawlUrls, isCrawl4AIAvailable } from '../../../datasources';
-import type { SearchResult as DataSourceSearchResult, DataSourceType } from '../../../datasources';
+import { mcpFetchUrls, isMcpFetchAvailable } from '../../../datasources';
+import type { SearchResult as DataSourceSearchResult } from '../../../datasources';
 import type { SearchResult, ExtractionResult } from '../../types';
 
 /**
- * Crawl4AI 爬取结果（包含额外信息）
+ * MCP Fetch 爬取结果（包含额外信息）
  */
-interface Crawl4SearchResult extends DataSourceSearchResult {
-  crawl4aiContent?: {
+interface McpFetchSearchResult extends DataSourceSearchResult {
+  mcpFetchContent?: {
     original: string;
     enriched: string;
     timestamp: string;
@@ -83,8 +83,15 @@ async function executeCrawl(
   }
 
   try {
+    // 使用 MCP Fetch 爬取
+    const mcpAvailable = await isMcpFetchAvailable();
+    if (!mcpAvailable) {
+      console.warn('[Extractor] MCP Fetch not available, skipping crawl');
+      return null;
+    }
+
     const crawled = await Promise.race([
-      crawlUrls([result.url]),
+      mcpFetchUrls([result.url]),
       sleep(config.timeout).then(() => [] as DataSourceSearchResult[]),
     ]);
 
@@ -92,8 +99,8 @@ async function executeCrawl(
       return null;
     }
 
-    const page = crawled[0] as Crawl4SearchResult;
-    const enriched = page.crawl4aiContent?.enriched || page.content || '';
+    const page = crawled[0] as McpFetchSearchResult;
+    const enriched = page.mcpFetchContent?.enriched || page.content || '';
     const compressed = compressContent(enriched, config.maxContentLength);
     const entities = extractEntitiesFromContent(compressed);
 

@@ -112,6 +112,7 @@ export interface ExtractionResult {
     features: string[];
     competitors: string[];
     techStack: string[];
+    filePath?: string;  // 新架构：本地文件路径
   };
 }
 

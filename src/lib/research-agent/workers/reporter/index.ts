@@ -19,6 +19,7 @@ import {
 } from './templates';
 import { updateProgress } from '../../progress/tracker';
 import { createCancelCheck } from '../../cancellation/handler';
+import { getFileStorageService } from '@/lib/file-storage';
 
 /**
  * Reporter Agent 配置
@@ -173,8 +174,22 @@ ${renderCitations(citations)}
       };
     }
 
-    // 保存报告（这里只返回内容，实际保存由调用方处理）
-    const reportPath = `task-data/${projectId}-report.md`;
+    // 使用 FileStorageService 保存报告
+    const fileService = getFileStorageService();
+    let reportPath: string | undefined;
+
+    if (state.projectPath) {
+      // 保存到项目目录
+      const saveResult = fileService.saveReport(state.projectPath, fullReport);
+      if (saveResult.success && saveResult.filePath) {
+        reportPath = saveResult.filePath;
+      }
+    }
+
+    // 如果没有项目路径，使用旧路径作为回退
+    if (!reportPath) {
+      reportPath = `task-data/project-${projectId}/report.md`;
+    }
 
     // 更新进度
     await updateProgress(projectId, {

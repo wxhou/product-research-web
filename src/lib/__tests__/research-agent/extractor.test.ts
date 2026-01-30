@@ -31,7 +31,7 @@ describe('Extractor Worker', () => {
     it('should validate metadata structure', () => {
       const result: ExtractionResult = {
         url: 'https://test.com',
-        source: 'crawl4ai',
+        source: 'mcp-fetch',
         title: 'Test',
         content: 'Content...',
         metadata: {

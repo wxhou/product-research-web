@@ -97,6 +97,12 @@ export interface ResearchState {
   // 提取阶段产物
   extractedContent: ExtractionResult[];
 
+  // 文件存储路径（新增）
+  projectPath?: string;        // 项目根目录路径
+  rawFiles?: string[];         // 原始文件路径列表
+  rawFileCount?: number;       // 原始文件数量
+  analysisFiles?: string[];    // 分析文件路径列表
+
   // 分析阶段产物
   analysis?: AnalysisResult;
   dataQuality?: DataQualityCheck;

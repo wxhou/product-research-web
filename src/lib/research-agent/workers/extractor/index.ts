@@ -4,10 +4,10 @@
  * 负责爬取和提取网页内容的 Agent
  *
  * 功能：
- * 1. 获取待爬取的搜索结果
- * 2. 爬取网页内容
- * 3. 提取结构化信息
- * 4. 更新状态
+ * 1. 创建项目文件目录结构
+ * 2. 使用 MCP Fetch 爬取网页内容
+ * 3. 保存原始 Markdown 文件到文件系统
+ * 4. 生成项目索引和清单
  */
 
 import type { ResearchState } from '../../state';
@@ -15,6 +15,7 @@ import type { SearchResult, ExtractionResult } from '../../types';
 import { createCrawlTools, type CrawlTools } from './tools';
 import { updateProgress } from '../../progress/tracker';
 import { createCancelCheck } from '../../cancellation/handler';
+import { getFileStorageService, type FileStorageService } from '@/lib/file-storage';
 
 /**
  * Extractor Agent 配置
@@ -24,18 +25,15 @@ export interface ExtractorConfig {
   maxCrawlCount: number;
   /** 是否跳过已爬取的内容 */
   skipCrawled: boolean;
-  /** 是否压缩内容 */
-  enableCompression: boolean;
-  /** 压缩后的最大长度 */
-  maxCompressedLength: number;
+  /** 是否保存文件到磁盘 */
+  saveToFiles: boolean;
 }
 
 /** 默认配置 */
 const DEFAULT_CONFIG: ExtractorConfig = {
   maxCrawlCount: 20,
   skipCrawled: true,
-  enableCompression: true,
-  maxCompressedLength: 50000, // 50KB
+  saveToFiles: true,  // 默认保存文件
 };
 
 /**
@@ -44,6 +42,8 @@ const DEFAULT_CONFIG: ExtractorConfig = {
 export interface ExtractorResult {
   success: boolean;
   extractedContent?: ExtractionResult[];
+  projectPath?: string;
+  rawFileCount?: number;
   error?: string;
 }
 
@@ -52,25 +52,25 @@ export interface ExtractorResult {
  */
 function createExtractorAgent(config: Partial<ExtractorConfig> = {}) {
   const finalConfig = { ...DEFAULT_CONFIG, ...config };
-  const tools = createCrawlTools({
-    maxContentLength: finalConfig.maxCompressedLength,
+  const crawlTools = createCrawlTools({
+    maxContentLength: 100000,  // 保留完整内容（不压缩）
   });
 
   return {
     config: finalConfig,
-    execute: (state: ResearchState) => executeExtract(state, finalConfig, tools),
+    execute: (state: ResearchState) => executeExtract(state, finalConfig, crawlTools),
   };
 }
 
 /**
- * 主执行函数：提取内容
+ * 主执行函数：提取内容并保存到文件
  */
 async function executeExtract(
   state: ResearchState,
   config: ExtractorConfig,
-  tools: CrawlTools
+  crawlTools: CrawlTools
 ): Promise<ExtractorResult> {
-  const { projectId, searchResults, extractedContent } = state;
+  const { projectId, title, description, keywords, searchResults } = state;
 
   // 获取待爬取的结果
   const toCrawl = config.skipCrawled
@@ -84,8 +84,16 @@ async function executeExtract(
     return {
       success: true,
       extractedContent: [],
+      rawFileCount: 0,
     };
   }
+
+  // 创建文件存储服务
+  const fileService = getFileStorageService();
+
+  // 创建项目目录并初始化索引
+  const projectPath = fileService.createProjectDir(projectId);
+  fileService.initProjectIndex(projectPath, projectId, title, description, keywords);
 
   // 创建取消检查
   const isCancelled = createCancelCheck(projectId);
@@ -101,9 +109,11 @@ async function executeExtract(
     });
 
     const allExtractions: ExtractionResult[] = [];
-    const batchSize = config.maxCrawlCount;
+    const rawFilePaths: string[] = [];
+    let successCount = 0;
 
-    // 分批爬取
+    // 分批并发爬取
+    const batchSize = 3;  // 并发数
     for (let i = 0; i < targets.length; i += batchSize) {
       // 检查取消
       if (isCancelled()) {
@@ -111,6 +121,8 @@ async function executeExtract(
           success: false,
           error: '爬取被用户取消',
           extractedContent: allExtractions,
+          projectPath,
+          rawFileCount: successCount,
         };
       }
 
@@ -124,9 +136,25 @@ async function executeExtract(
         currentItem: batch[0]?.url || '',
       });
 
-      // 爬取批次
-      const batchResults = await tools.crawlAll(batch);
-      allExtractions.push(...batchResults);
+      // 并发爬取批次
+      const batchResults = await Promise.all(
+        batch.map(async (result, batchIndex) => {
+          const globalIndex = i + batchIndex + 1;
+          return crawlWithFileSave(result, fileService, projectPath, globalIndex, crawlTools);
+        })
+      );
+
+      // 收集结果
+      for (let j = 0; j < batchResults.length; j++) {
+        const result = batchResults[j];
+        if (result.extraction) {
+          allExtractions.push(result.extraction);
+          if (result.filePath) {
+            rawFilePaths.push(result.filePath);
+          }
+          successCount++;
+        }
+      }
     }
 
     // 更新进度
@@ -135,18 +163,74 @@ async function executeExtract(
       step: '内容提取完成',
       totalItems: targets.length,
       completedItems: targets.length,
-      currentItem: `${allExtractions.length} 个页面`,
+      currentItem: `${successCount} 个页面已保存到文件`,
     });
+
+    // 生成主文件
+    const masterContent = fileService.generateMasterFile(projectPath);
+    fileService.saveAnalysisFile(projectPath, 'summary', masterContent, '项目索引');
 
     return {
       success: true,
       extractedContent: allExtractions,
+      projectPath,
+      rawFileCount: successCount,
     };
   } catch (error) {
     return {
       success: false,
       error: error instanceof Error ? error.message : '内容提取失败',
+      projectPath,
     };
+  }
+}
+
+/**
+ * 爬取单个 URL 并保存到文件
+ */
+async function crawlWithFileSave(
+  result: SearchResult,
+  fileService: FileStorageService,
+  projectPath: string,
+  index: number,
+  crawlTools: CrawlTools
+): Promise<{
+  extraction: ExtractionResult | null;
+  filePath?: string;
+}> {
+  try {
+    // 爬取内容
+    const extraction = await crawlTools.crawl(result);
+
+    if (!extraction) {
+      return { extraction: null };
+    }
+
+    // 保存到文件
+    const saveResult = fileService.saveRawFile(projectPath, index, extraction.content, {
+      url: result.url,
+      title: extraction.title || result.title,
+      source: result.source,
+    });
+
+    if (saveResult.success && saveResult.filePath) {
+      // 返回完整内容给 Analyzer（保存到 state）
+      return {
+        extraction: {
+          ...extraction,
+          metadata: {
+            ...extraction.metadata,
+            filePath: saveResult.filePath,
+          },
+        },
+        filePath: saveResult.filePath,
+      };
+    }
+
+    return { extraction };
+  } catch (error) {
+    console.error(`爬取失败 [${result.url}]:`, error);
+    return { extraction: null };
   }
 }
 
@@ -217,22 +301,6 @@ export function evaluateExtractionQuality(
   if (emptyContentCount > extractions.length * 0.3) {
     issues.push(`空内容过多: ${emptyContentCount}/${extractions.length}`);
     score -= 15;
-  }
-
-  // 检查实体提取
-  let totalFeatures = 0;
-  let totalCompetitors = 0;
-  let totalTech = 0;
-
-  for (const ext of extractions) {
-    totalFeatures += ext.metadata.features.length;
-    totalCompetitors += ext.metadata.competitors.length;
-    totalTech += ext.metadata.techStack.length;
-  }
-
-  if (totalFeatures < 5) {
-    issues.push('功能提取不足');
-    score -= 5;
   }
 
   return {

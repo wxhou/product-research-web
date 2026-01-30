@@ -117,13 +117,13 @@ export default function SettingsPage() {
   const [llmTemperature, setLlmTemperature] = useState(0.7);
   const [llmTimeout, setLlmTimeout] = useState(120);
   const [llmSaving, setLlmSaving] = useState(false);
-  // Crawl4AI 配置状态
-  const [crawl4aiConfig, setCrawl4aiConfig] = useState<{
-    url: string;
+  // MCP Fetch 配置状态
+  const [mcpFetchConfig, setMcpFetchConfig] = useState<{
     enabled: boolean;
+    maxLength: number;
   } | null>(null);
-  const [crawl4aiSaving, setCrawl4aiSaving] = useState(false);
-  const [crawl4aiMessage, setCrawl4aiMessage] = useState<string | null>(null);
+  const [mcpFetchSaving, setMcpFetchSaving] = useState(false);
+  const [mcpFetchMessage, setMcpFetchMessage] = useState<string | null>(null);
 
   const router = useRouter();
   const { isAdmin, isAuthenticated, loading: authLoading } = useAuth();
@@ -140,49 +140,49 @@ export default function SettingsPage() {
     if (isAuthenticated) {
       fetchDataSources();
       fetchLLMConfig();
-      fetchCrawl4AIConfig();
+      fetchMcpFetchConfig();
     }
   }, [isAuthenticated]);
 
-  // 加载 Crawl4AI 配置
-  const fetchCrawl4AIConfig = async () => {
+  // 加载 MCP Fetch 配置
+  const fetchMcpFetchConfig = async () => {
     try {
-      const res = await fetch('/api/settings/crawl4ai');
+      const res = await fetch('/api/settings/mcp-fetch');
       const data = await res.json();
       if (data.success && data.data) {
-        setCrawl4aiConfig(data.data);
+        setMcpFetchConfig(data.data);
       } else {
         // 默认值
-        setCrawl4aiConfig({ url: 'http://localhost:11235', enabled: false });
+        setMcpFetchConfig({ enabled: false, maxLength: 50000 });
       }
     } catch (e) {
-      console.error('Failed to load Crawl4AI config:', e);
-      setCrawl4aiConfig({ url: 'http://localhost:11235', enabled: false });
+      console.error('Failed to load MCP Fetch config:', e);
+      setMcpFetchConfig({ enabled: false, maxLength: 50000 });
     }
   };
 
-  // 保存 Crawl4AI 配置
-  const saveCrawl4AIConfig = async () => {
-    if (!crawl4aiConfig) return;
-    setCrawl4aiSaving(true);
-    setCrawl4aiMessage(null);
+  // 保存 MCP Fetch 配置
+  const saveMcpFetchConfig = async () => {
+    if (!mcpFetchConfig) return;
+    setMcpFetchSaving(true);
+    setMcpFetchMessage(null);
     try {
-      const res = await fetch('/api/settings/crawl4ai', {
+      const res = await fetch('/api/settings/mcp-fetch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(crawl4aiConfig),
+        body: JSON.stringify(mcpFetchConfig),
       });
       const data = await res.json();
       if (data.success) {
-        setCrawl4aiMessage('配置已保存');
-        setTimeout(() => setCrawl4aiMessage(null), 2000);
+        setMcpFetchMessage('配置已保存');
+        setTimeout(() => setMcpFetchMessage(null), 2000);
       } else {
-        setCrawl4aiMessage('保存失败: ' + data.error);
+        setMcpFetchMessage('保存失败: ' + data.error);
       }
     } catch (e) {
-      setCrawl4aiMessage('保存失败，请检查网络连接');
+      setMcpFetchMessage('保存失败，请检查网络连接');
     } finally {
-      setCrawl4aiSaving(false);
+      setMcpFetchSaving(false);
     }
   };
 
@@ -661,46 +661,52 @@ export default function SettingsPage() {
             <div className="preference-info">
               <div className="preference-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
-                  <path d="M12 16v-4M12 8h.01" />
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                 </svg>
               </div>
               <div>
-                <h3>Crawl4AI 全文爬虫</h3>
-                <p>开源网页爬虫，用于获取完整页面内容（需本地部署）</p>
+                <h3>MCP Fetch 网页提取</h3>
+                <p>使用 MCP 协议提取网页 Markdown 内容</p>
               </div>
             </div>
-            <div className="crawl4ai-config" style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '280px' }}>
-              <div className="crawl4ai-url-row" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <input
-                  type="text"
-                  className="input"
-                  placeholder="http://localhost:11235"
-                  value={crawl4aiConfig?.url || ''}
-                  onChange={(e) => setCrawl4aiConfig({ ...crawl4aiConfig!, url: e.target.value })}
-                  onBlur={saveCrawl4AIConfig}
-                  style={{ flex: 1, minWidth: '200px' }}
-                  disabled={!crawl4aiConfig}
-                />
-                <label className="toggle" style={{ marginLeft: '12px' }}>
+            <div className="mcp-fetch-config" style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '280px' }}>
+              <div className="mcp-fetch-row" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <label className="toggle">
                   <input
                     type="checkbox"
-                    checked={crawl4aiConfig?.enabled || false}
+                    checked={mcpFetchConfig?.enabled || false}
                     onChange={(e) => {
-                      setCrawl4aiConfig({ ...crawl4aiConfig!, enabled: e.target.checked });
-                      saveCrawl4AIConfig();
+                      setMcpFetchConfig({ ...mcpFetchConfig!, enabled: e.target.checked });
+                      saveMcpFetchConfig();
                     }}
                   />
                   <span className="toggle-slider"></span>
                 </label>
+                <span style={{ color: 'var(--foreground-muted)', fontSize: '14px' }}>
+                  {mcpFetchConfig?.enabled ? '已启用' : '已禁用'}
+                </span>
               </div>
-              <p className="config-hint" style={{ fontSize: '13px', color: crawl4aiMessage?.includes('成功') ? 'var(--success)' : 'var(--foreground-muted)', margin: 0 }}>
-                {crawl4aiMessage || (
+              {mcpFetchConfig?.enabled && (
+                <div className="mcp-fetch-options" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <label style={{ fontSize: '14px', color: 'var(--foreground-muted)' }}>最大内容长度:</label>
+                  <input
+                    type="number"
+                    className="input"
+                    value={mcpFetchConfig?.maxLength || 50000}
+                    onChange={(e) => setMcpFetchConfig({ ...mcpFetchConfig!, maxLength: parseInt(e.target.value) || 50000 })}
+                    onBlur={saveMcpFetchConfig}
+                    min="10000"
+                    max="200000"
+                    step="5000"
+                    style={{ width: '120px' }}
+                  />
+                  <span style={{ fontSize: '14px', color: 'var(--foreground-muted)' }}>字符</span>
+                </div>
+              )}
+              <p className="config-hint" style={{ fontSize: '13px', color: mcpFetchMessage?.includes('成功') ? 'var(--success)' : 'var(--foreground-muted)', margin: 0 }}>
+                {mcpFetchMessage || (
                   <>
-                    <a href="https://github.com/unclecode/crawl4ai" target="_blank" rel="noopener noreferrer">
-                      安装指南
-                    </a>
-                    &nbsp;· Docker: <code style={{ background: 'var(--background-subtle)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>docker run -p 11235:11235 unclecode/crawl4ai</code>
+                    需安装 <code style={{ background: 'var(--background-subtle)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>mcp-fetch-server</code> 并设置环境变量 <code style={{ background: 'var(--background-subtle)', padding: '2px 6px', borderRadius: '4px', fontSize: '12px' }}>ENABLE_MCP_FETCH=true</code>
                   </>
                 )}
               </p>
