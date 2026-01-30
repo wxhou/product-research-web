@@ -111,12 +111,14 @@ export default function HomePage() {
   };
 
   const getStatusBadge = (status: Project['status']) => {
-    const config = {
-      completed: { label: '已完成', className: 'status-completed' },
+    const config: Record<string, { label: string; className: string }> = {
+      pending: { label: '等待中', className: 'status-pending' },
       processing: { label: '进行中', className: 'status-processing' },
+      completed: { label: '已完成', className: 'status-completed' },
+      failed: { label: '失败', className: 'status-failed' },
       draft: { label: '草稿', className: 'status-draft' },
     };
-    const { label, className } = config[status];
+    const { label, className } = config[status] || { label: status, className: 'status-draft' };
     return <span className={`status-badge ${className}`}>{label}</span>;
   };
 

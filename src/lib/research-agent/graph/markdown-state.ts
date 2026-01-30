@@ -5,7 +5,7 @@
  */
 
 import type { ResearchState } from '../state';
-import type { SearchResult, ExtractionResult, AnalysisResult, Citation } from '../types';
+import type { SearchResult, ExtractionResult, AnalysisResult, Citation, SearchPlan, SearchQuery } from '../types';
 
 // ============================================================
 // 类型定义
@@ -43,6 +43,10 @@ export interface StateMetadata {
   startedAt: string;
   updatedAt: string;
   completedAt?: string;
+  /** 搜索计划 */
+  searchPlan?: SearchPlan;
+  /** 待执行查询 */
+  pendingQueries?: SearchQuery[];
   /** SHA-256 校验和 */
   checksum?: string;
 }
@@ -279,6 +283,8 @@ export class MarkdownStateManager {
       startedAt: state.startedAt,
       updatedAt: options.addTimestamp ? new Date().toISOString() : state.updatedAt,
       completedAt: state.completedAt,
+      searchPlan: state.searchPlan,
+      pendingQueries: state.pendingQueries,
     };
 
     // 计算校验和
@@ -293,7 +299,7 @@ export class MarkdownStateManager {
    * 生成 Frontmatter
    */
   private generateFrontmatter(metadata: StateMetadata): string {
-    const frontmatter = {
+    const frontmatter: Record<string, unknown> = {
       projectId: metadata.projectId,
       title: metadata.title,
       status: metadata.status,
@@ -308,6 +314,16 @@ export class MarkdownStateManager {
       completedAt: metadata.completedAt,
       checksum: metadata.checksum,
     };
+
+    // 添加搜索计划（如果存在）
+    if (metadata.searchPlan) {
+      frontmatter.searchPlan = metadata.searchPlan;
+    }
+
+    // 添加待执行查询（如果存在）
+    if (metadata.pendingQueries && metadata.pendingQueries.length > 0) {
+      frontmatter.pendingQueries = metadata.pendingQueries;
+    }
 
     return `---\n${JSON.stringify(frontmatter, null, 2)}\n---\n\n`;
   }
@@ -517,7 +533,7 @@ ${state.completedAt ? `- **完成时间**: ${new Date(state.completedAt).toLocal
       totalSearches: metadata.totalSearches,
       totalResults: metadata.totalResults,
       searchResults: [],
-      pendingQueries: [],
+      pendingQueries: metadata.pendingQueries || [],
       extractedContent: [],
       citations: [],
       startedAt: metadata.startedAt,
@@ -526,6 +542,8 @@ ${state.completedAt ? `- **完成时间**: ${new Date(state.completedAt).toLocal
       retryCount: 0,
       maxRetries: 3,
       keywords: [],
+      // 恢复搜索计划（如果存在）
+      searchPlan: metadata.searchPlan,
     };
 
     // 解析搜索结果

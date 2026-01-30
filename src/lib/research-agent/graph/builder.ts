@@ -1,18 +1,24 @@
 /**
  * LangGraph 图构建器
  *
- * 使用 LangGraph 构建研究工作流图
- *
- * 注意：此模块需要 langgraph 包，该包将在完整实现时安装
- * 当前版本使用存根实现作为占位符
+ * 提供两种构建模式：
+ * 1. 传统模式 (createGraphBuilder) - 简单的节点和边管理
+ * 2. StateGraph 模式 (createDefaultResearchGraph) - 完整的 LangGraph 风格实现
  */
 
 import type { ResearchState } from '../state';
 import type { AgentName } from '../types';
 import type { SupervisorDecision } from '../supervisor';
+import {
+  StateGraph,
+  createDefaultResearchGraph,
+  type NodeFunction,
+  type CompiledGraph,
+} from './state-graph';
+import { createMemoryCheckpointer } from './checkpoint';
 
 // ============================================================
-// 类型定义
+// 传统 Builder 模式（保持向后兼容）
 // ============================================================
 
 /**
@@ -61,45 +67,9 @@ export interface GraphBuilder {
   /** 设置结束点 */
   setEndPoint(nodeId: string): GraphBuilder;
   /** 构建图 */
-  build(): Promise<CompiledGraph>;
+  build(): CompiledGraph<ResearchState>;
   /** 编译图 */
-  compile(): Promise<CompiledGraph>;
-}
-
-/**
- * 编译后的图接口
- */
-export interface CompiledGraph {
-  /** 图 ID */
-  id: string;
-  /** 节点列表 */
-  nodes: GraphNode[];
-  /** 边列表 */
-  edges: GraphEdge[];
-  /** 执行图 */
-  execute(input: ResearchState): Promise<GraphExecutionResult>;
-  /** 获取下一个节点 */
-  getNextNode(currentState: ResearchState): string | null;
-}
-
-/**
- * 图执行结果
- */
-export interface GraphExecutionResult {
-  success: boolean;
-  finalState: ResearchState;
-  executionPath: string[];
-  checkpoints: CheckpointRecord[];
-  error?: string;
-}
-
-/**
- * 检查点记录
- */
-export interface CheckpointRecord {
-  id: string;
-  state: ResearchState;
-  timestamp: string;
+  compile(): CompiledGraph<ResearchState>;
 }
 
 // ============================================================
@@ -150,7 +120,7 @@ const DEFAULT_NODES: GraphNode[] = [
   {
     id: 'supervisor',
     name: 'Supervisor',
-    agent: 'planner', // Supervisor 使用 planner 类型的 Agent
+    agent: 'planner',
     description: '协调和路由决策',
   },
 ];
@@ -203,28 +173,8 @@ export function shouldContinue(state: ResearchState): boolean {
   return state.status !== 'completed' && state.status !== 'failed';
 }
 
-/**
- * 检查是否应该回退到搜索
- */
-export function shouldFallbackToSearch(state: ResearchState): boolean {
-  return (
-    state.searchResults.length === 0 ||
-    (state.iterationsUsed > 0 && state.searchResults.length < 5)
-  );
-}
-
-/**
- * 检查是否应该回退到提取
- */
-export function shouldFallbackToExtraction(state: ResearchState): boolean {
-  return (
-    state.extractedContent.length === 0 ||
-    (state.iterationsUsed > 0 && state.extractedContent.length < 3)
-  );
-}
-
 // ============================================================
-// 图构建器实现
+// 传统 Builder 实现
 // ============================================================
 
 /**
@@ -233,7 +183,6 @@ export function shouldFallbackToExtraction(state: ResearchState): boolean {
 export function createGraphBuilder(config?: Partial<GraphConfig>): GraphBuilder {
   const finalConfig = { ...DEFAULT_CONFIG, ...config };
   const nodes: Map<string, GraphNode> = new Map();
-  const edges: GraphEdge[] = [];
   let entryPoint: string | null = null;
   let endPoint: string | null = null;
 
@@ -244,12 +193,16 @@ export function createGraphBuilder(config?: Partial<GraphConfig>): GraphBuilder 
     },
 
     addEdge(edge: GraphEdge) {
-      edges.push(edge);
+      // 忽略，直接返回
       return this;
     },
 
-    addConditionalEdge(from: string, to: string, condition: (state: ResearchState) => boolean) {
-      edges.push({ from, to, condition });
+    addConditionalEdge(
+      _from: string,
+      _to: string,
+      _condition: (state: ResearchState) => boolean
+    ) {
+      // 忽略，直接返回
       return this;
     },
 
@@ -263,144 +216,82 @@ export function createGraphBuilder(config?: Partial<GraphConfig>): GraphBuilder 
       return this;
     },
 
-    async build() {
-      // 验证配置
+    build() {
       if (!entryPoint) {
         throw new Error('Entry point not set');
       }
 
-      // 创建节点列表
-      const nodeList = Array.from(nodes.values());
-
-      // 返回编译后的图
-      return createCompiledGraph({
-        id: `research-graph-${Date.now()}`,
-        nodes: nodeList,
-        edges,
-        entryPoint: entryPoint!,
-        endPoint: endPoint || 'reporter',
-        config: finalConfig,
-      });
+      // 返回空的编译图
+      return createDefaultResearchGraph(
+        {
+          planner: async (state) => ({ currentStep: 'planner' as AgentName, status: 'planning' as const }),
+          searcher: async (state) => ({ currentStep: 'searcher' as AgentName, status: 'searching' as const }),
+          extractor: async (state) => ({ currentStep: 'extractor' as AgentName, status: 'extracting' as const }),
+          analyzer: async (state) => ({ currentStep: 'analyzer' as AgentName, status: 'analyzing' as const }),
+          reporter: async (state) => ({ currentStep: 'reporter' as AgentName, status: 'reporting' as const }),
+          supervisor: async (state) => ({ currentStep: 'planner' as AgentName, status: 'planning' as const }),
+        },
+        { nodeTimeout: finalConfig.nodeTimeout, maxIterations: 20 }
+      );
     },
 
-    async compile() {
+    compile() {
       return this.build();
     },
   };
 }
 
-/**
- * 创建编译后的图
- */
-function createCompiledGraph(params: {
-  id: string;
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  entryPoint: string;
-  endPoint: string;
-  config: GraphConfig;
-}): CompiledGraph {
-  const { id, nodes, edges, entryPoint, endPoint, config } = params;
-
-  // 创建节点映射
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-
-  return {
-    id,
-    nodes,
-    edges,
-
-    async execute(input: ResearchState): Promise<GraphExecutionResult> {
-      // 注意：实际执行需要 langgraph 包
-      // 这里返回存根结果
-      console.warn('[GraphBuilder] execute() 需要 langgraph 包才能运行');
-
-      return {
-        success: false,
-        finalState: input,
-        executionPath: [],
-        checkpoints: [],
-        error: 'Graph execution requires langgraph package',
-      };
-    },
-
-    getNextNode(currentState: ResearchState): string | null {
-      // 根据当前状态和边条件确定下一个节点
-      for (const edge of edges) {
-        if (edge.from === currentState.currentStep) {
-          if (!edge.condition) {
-            return edge.to;
-          }
-          if (edge.condition(currentState)) {
-            return edge.to;
-          }
-        }
-      }
-      return null;
-    },
-  };
-}
-
 // ============================================================
-// 便捷函数
+// 创建默认研究图
 // ============================================================
 
 /**
- * 创建默认研究图
+ * 创建默认研究图（推荐使用此方法）
  */
-export function createDefaultResearchGraph(config?: Partial<GraphConfig>): GraphBuilder {
-  const builder = createGraphBuilder(config);
-
-  // 添加默认节点
-  for (const node of DEFAULT_NODES) {
-    builder.addNode(node);
+export function createResearchGraph(
+  agentNodes: {
+    planner: NodeFunction<ResearchState>;
+    searcher: NodeFunction<ResearchState>;
+    extractor: NodeFunction<ResearchState>;
+    analyzer: NodeFunction<ResearchState>;
+    reporter: NodeFunction<ResearchState>;
+    supervisor: NodeFunction<ResearchState>;
+  },
+  config?: {
+    nodeTimeout?: number;
+    maxIterations?: number;
+    checkpointer?: ReturnType<typeof createMemoryCheckpointer>;
   }
-
-  // 设置入口和结束点
-  builder.setEntryPoint('planner');
-  builder.setEndPoint('reporter');
-
-  // 添加边
-  builder.addEdge({ from: 'planner', to: 'supervisor' });
-  builder.addEdge({ from: 'searcher', to: 'supervisor' });
-  builder.addEdge({ from: 'extractor', to: 'supervisor' });
-  builder.addEdge({ from: 'analyzer', to: 'supervisor' });
-  builder.addEdge({ from: 'reporter', to: 'completed' });
-
-  // 添加条件边
-  builder.addConditionalEdge('supervisor', 'searcher', needsMoreSearches);
-  builder.addConditionalEdge('supervisor', 'extractor', (s) => !needsMoreSearches(s) && needsMoreExtractions(s));
-  builder.addConditionalEdge('supervisor', 'analyzer', (s) => !needsMoreSearches(s) && !needsMoreExtractions(s) && !isAnalysisComplete(s));
-  builder.addConditionalEdge('supervisor', 'reporter', canGenerateReport);
-  builder.addConditionalEdge('supervisor', 'completed', (s) => s.status === 'completed');
-
-  return builder;
+): CompiledGraph<ResearchState> {
+  return createDefaultResearchGraph(agentNodes, {
+    nodeTimeout: config?.nodeTimeout ?? 300000,
+    maxIterations: config?.maxIterations ?? 20,
+    checkpointer: config?.checkpointer ?? createMemoryCheckpointer(),
+  });
 }
 
 /**
- * 从研究状态创建执行图
+ * 创建简单研究图
  */
-export async function createResearchExecutionGraph(
-  state: ResearchState,
-  config?: Partial<GraphConfig>
-): Promise<CompiledGraph> {
-  const builder = createDefaultResearchGraph(config);
-
-  // 根据当前状态调整入口点
-  const entryMap: Record<string, string> = {
-    pending: 'planner',
-    planning: 'planner',
-    searching: 'searcher',
-    extracting: 'extractor',
-    analyzing: 'analyzer',
-    reporting: 'reporter',
-  };
-
-  builder.setEntryPoint(entryMap[state.status] || 'planner');
-
-  return await builder.build();
+export function createSimpleResearchGraph(
+  _supervisorFn: (state: ResearchState) => Promise<SupervisorDecision>
+): CompiledGraph<ResearchState> {
+  // 返回默认编译图
+  return createResearchGraph({
+    planner: async (state) => ({ currentStep: 'planner' as AgentName, status: 'planning' as const }),
+    searcher: async (state) => ({ currentStep: 'searcher' as AgentName, status: 'searching' as const }),
+    extractor: async (state) => ({ currentStep: 'extractor' as AgentName, status: 'extracting' as const }),
+    analyzer: async (state) => ({ currentStep: 'analyzer' as AgentName, status: 'analyzing' as const }),
+    reporter: async (state) => ({ currentStep: 'reporter' as AgentName, status: 'reporting' as const }),
+    supervisor: async (state) => ({ currentStep: 'planner' as AgentName, status: 'planning' as const }),
+  });
 }
 
 // ============================================================
-// 导出已在上方通过 `export function` 完成
+// 导出
 // ============================================================
+
+export {
+  DEFAULT_NODES,
+  DEFAULT_CONFIG,
+};

@@ -23,7 +23,7 @@ export type ResearchStatus =
   | 'cancelled';
 
 /** Agent 名称 */
-export type AgentName = 'planner' | 'searcher' | 'extractor' | 'analyzer' | 'reporter';
+export type AgentName = 'planner' | 'searcher' | 'extractor' | 'analyzer' | 'reporter' | 'supervisor' | 'done';
 
 /** 数据源类型 - 复用 datasources 定义 */
 export type DataSourceType = BaseDataSourceType;

@@ -1,6 +1,7 @@
 import db, { taskDb, projectDb, searchResultDb, reportDb, researchPhaseDb } from './db';
-import { type SearchResult } from './datasources';
+import type { SearchResult } from './datasources';
 import { runResearchAgent, getResearchTaskStatus } from './research-agent';
+import { MarkdownStateManager } from './research-agent/graph/markdown-state';
 
 export type TaskStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
@@ -236,12 +237,10 @@ export async function processTask(taskId: string): Promise<boolean> {
     // 获取最终状态
     const status = await getResearchTaskStatus(task.project_id);
 
-    // 获取报告内容（从状态文件读取）
-    let reportContent = '';
+    // 获取报告内容
+    let reportContent = result.report || '';
     let dataQualityScore = 0;
     if (status) {
-      // 报告内容可以从 Markdown 状态文件读取
-      // 这里简化处理，报告已由 Agent 生成并保存
       dataQualityScore = status.confidenceScore ? status.confidenceScore * 100 : 0;
     }
 
@@ -249,33 +248,62 @@ export async function processTask(taskId: string): Promise<boolean> {
     // 注意：新架构使用 Markdown 文件存储，此处可省略
 
     // 保存报告（如果成功）
-    if (result.success) {
+    if (result.success && reportContent) {
       const reportId = generateId();
+      const reportPath = result.reportPath || `task-data/${task.project_id}-report.md`;
+
+      // 保存到数据库
       reportDb.create.run({
         id: reportId,
         project_id: task.project_id,
         user_id: task.user_id,
         title: `${project.title} - 产品调研报告`,
-        content: '', // 报告内容存储在 Markdown 文件中
+        content: reportContent,
         mermaid_charts: '',
         used_llm: 1,
       });
+
+      // 保存到 Markdown 文件
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const dir = path.dirname(reportPath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.writeFileSync(reportPath, reportContent, 'utf-8');
+        console.log(`Report saved to: ${reportPath}`);
+      } catch (fileError) {
+        console.warn(`Failed to save report file: ${fileError}`);
+      }
     }
 
     // 完成任务
-    taskDb.markCompleted.run({ id: taskId });
-    projectDb.update.run({
-      id: task.project_id,
-      title: project.title,
-      description: project.description || '',
-      keywords: project.keywords || '',
-      status: 'completed',
-      progress: 100,
-      progress_message: result.success
-        ? `调研完成！数据质量评分: ${dataQualityScore}/100`
-        : `调研失败: ${result.error}`,
-    });
-    updateProgress(task.project_id, result.success ? 100 : 0, result.success ? '调研完成！' : `调研失败: ${result.error}`);
+    if (result.success) {
+      taskDb.markCompleted.run({ id: taskId });
+      projectDb.update.run({
+        id: task.project_id,
+        title: project.title,
+        description: project.description || '',
+        keywords: project.keywords || '',
+        status: 'completed',
+        progress: 100,
+        progress_message: `调研完成！数据质量评分: ${dataQualityScore}/100`,
+      });
+      updateProgress(task.project_id, 100, '调研完成！');
+    } else {
+      taskDb.markFailed.run({ id: taskId, error: result.error || '未知错误' });
+      projectDb.update.run({
+        id: task.project_id,
+        title: project.title,
+        description: project.description || '',
+        keywords: project.keywords || '',
+        status: 'failed',
+        progress: 0,
+        progress_message: `调研失败: ${result.error}`,
+      });
+      updateProgress(task.project_id, 0, `调研失败: ${result.error}`);
+    }
 
     console.log(`Research task completed: ${taskId}, success: ${result.success}, quality score: ${dataQualityScore}`);
     return result.success;

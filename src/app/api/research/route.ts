@@ -5,6 +5,7 @@ import { analyzeSearchResults, generateFullReport, type AnalysisResult } from '@
 import { generateText, getLLMConfig, PRODUCT_ANALYST_PROMPT } from '@/lib/llm';
 import { createResearchTask, getUserActiveTaskCount, getProjectLogs } from '@/lib/taskQueue';
 import { MarkdownStateManager } from '@/lib/research-agent/graph/markdown-state';
+import { getProgress } from '@/lib/research-agent/progress/tracker';
 import type { ProgressDetail } from '@/lib/research-agent/types';
 
 // 获取当前用户信息
@@ -431,28 +432,30 @@ export async function GET(request: NextRequest) {
   // 获取项目日志
   const logs = getProjectLogs(projectId, 30);
 
-  // 获取详细进度信息（从状态文件读取）
-  let progressDetail: ProgressDetail | null = null;
-  try {
-    const stateManager = new MarkdownStateManager({
-      stateDir: 'task-data',
-    });
-    const state = await stateManager.readState(projectId);
-    if (state?.progressDetail) {
-      progressDetail = state.progressDetail as ProgressDetail;
-    } else {
-      // 从状态构造默认进度详情
-      progressDetail = {
-        stage: project.status || 'pending',
-        step: project.progress_message || '等待开始',
-        totalItems: 10,
-        completedItems: Math.round((project.progress || 0) / 10),
-        currentItem: '',
-        percentage: project.progress || 0,
-      };
+  // 获取详细进度信息
+  // 优先从内存存储获取（实时更新）
+  let progressDetail: ProgressDetail | null = await getProgress(projectId);
+
+  // 如果内存中没有，尝试从状态文件获取
+  if (!progressDetail) {
+    try {
+      const stateManager = new MarkdownStateManager({
+        stateDir: 'task-data',
+      });
+
+      if (stateManager.exists(projectId)) {
+        const state = await stateManager.readState(projectId);
+        if (state?.progressDetail) {
+          progressDetail = state.progressDetail as ProgressDetail;
+        }
+      }
+    } catch {
+      // 忽略错误
     }
-  } catch {
-    // 使用默认进度
+  }
+
+  // 如果还是没有，使用数据库中的信息构造
+  if (!progressDetail) {
     progressDetail = {
       stage: project.status || 'pending',
       step: project.progress_message || '等待开始',

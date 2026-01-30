@@ -2,13 +2,184 @@
  * 检查点管理器
  *
  * 负责状态的持久化和恢复
+ *
+ * 支持两种模式：
+ * 1. CheckpointManager - 传统检查点管理（按项目组织）
+ * 2. CheckpointSaver - LangGraph 风格的检查点存储（支持线程/会话）
  */
 
-import type { ResearchState } from '../state';
+import type { ResearchState, Checkpoint } from '../state';
 import type { BackupManifest, BackupConfig } from '../types';
 
 // ============================================================
-// 类型定义
+// CheckpointSaver 接口 (LangGraph 风格)
+// ============================================================
+
+/**
+ * 检查点配置（LangGraph 风格）
+ */
+export interface LangGraphCheckpointConfig {
+  /** 线程 ID（用于区分不同的执行会话） */
+  threadId: string;
+  /** 检查点 ID（可选，用于恢复到特定检查点） */
+  checkpointId?: string;
+}
+
+/**
+ * 检查点保存器接口
+ *
+ * 对应 LangGraph 的 CheckpointSaver
+ */
+export interface CheckpointSaver {
+  /**
+   * 保存检查点
+   */
+  put(
+    state: ResearchState,
+    config: LangGraphCheckpointConfig
+  ): Promise<Checkpoint>;
+
+  /**
+   * 获取最新检查点
+   */
+  get(config: LangGraphCheckpointConfig): Promise<Checkpoint | null>;
+
+  /**
+   * 获取特定检查点
+   */
+  getCheckpoint(checkpointId: string, config: LangGraphCheckpointConfig): Promise<Checkpoint | null>;
+
+  /**
+   * 列出所有检查点
+   */
+  list(config: LangGraphCheckpointConfig): AsyncGenerator<Checkpoint, void>;
+
+  /**
+   * 删除检查点
+   */
+  delete(checkpointId: string, config: LangGraphCheckpointConfig): Promise<boolean>;
+}
+
+/**
+ * 内存检查点保存器
+ */
+export class MemoryCheckpointer implements CheckpointSaver {
+  private checkpoints: Map<string, Checkpoint> = new Map();
+  private threadCheckpoints: Map<string, string[]> = new Map();
+
+  async put(
+    state: ResearchState,
+    config: LangGraphCheckpointConfig
+  ): Promise<Checkpoint> {
+    const checkpointId = config.checkpointId || `checkpoint-${Date.now()}`;
+    const threadKey = this._getThreadKey(config);
+
+    const checkpoint: Checkpoint = {
+      config: {
+        configurable: {
+          thread_id: config.threadId,
+          checkpoint_id: checkpointId,
+        },
+      },
+      checkpoint: state,
+      metadata: {
+        source: 'memory',
+        created_at: new Date().toISOString(),
+      },
+      parentCheckpointId: this._getLatestCheckpointId(threadKey) || undefined,
+    };
+
+    // 保存检查点
+    this.checkpoints.set(checkpointId, checkpoint);
+
+    // 更新线程索引
+    if (!this.threadCheckpoints.has(threadKey)) {
+      this.threadCheckpoints.set(threadKey, []);
+    }
+    const threadCheckpoints = this.threadCheckpoints.get(threadKey)!;
+    threadCheckpoints.push(checkpointId);
+
+    console.log(`[Checkpointer] Saved checkpoint ${checkpointId} for thread ${config.threadId}`);
+    return checkpoint;
+  }
+
+  async get(config: LangGraphCheckpointConfig): Promise<Checkpoint | null> {
+    const threadKey = this._getThreadKey(config);
+    const threadCheckpoints = this.threadCheckpoints.get(threadKey);
+
+    if (!threadCheckpoints || threadCheckpoints.length === 0) {
+      return null;
+    }
+
+    const latestId = threadCheckpoints[threadCheckpoints.length - 1];
+    return this.checkpoints.get(latestId) || null;
+  }
+
+  async getCheckpoint(
+    checkpointId: string,
+    _config: LangGraphCheckpointConfig
+  ): Promise<Checkpoint | null> {
+    return this.checkpoints.get(checkpointId) || null;
+  }
+
+  async *list(config: LangGraphCheckpointConfig): AsyncGenerator<Checkpoint, void> {
+    const threadKey = this._getThreadKey(config);
+    const threadCheckpoints = this.threadCheckpoints.get(threadKey) || [];
+
+    for (const checkpointId of threadCheckpoints) {
+      const checkpoint = this.checkpoints.get(checkpointId);
+      if (checkpoint) {
+        yield checkpoint;
+      }
+    }
+  }
+
+  async delete(
+    checkpointId: string,
+    _config: LangGraphCheckpointConfig
+  ): Promise<boolean> {
+    const checkpoint = this.checkpoints.get(checkpointId);
+    if (!checkpoint) {
+      return false;
+    }
+
+    this.checkpoints.delete(checkpointId);
+
+    // 从线程索引中移除
+    for (const [threadKey, checkpoints] of this.threadCheckpoints) {
+      const index = checkpoints.indexOf(checkpointId);
+      if (index !== -1) {
+        checkpoints.splice(index, 1);
+        break;
+      }
+    }
+
+    console.log(`[Checkpointer] Deleted checkpoint ${checkpointId}`);
+    return true;
+  }
+
+  private _getThreadKey(config: LangGraphCheckpointConfig): string {
+    return config.threadId;
+  }
+
+  private _getLatestCheckpointId(threadKey: string): string | null {
+    const checkpoints = this.threadCheckpoints.get(threadKey);
+    if (!checkpoints || checkpoints.length === 0) {
+      return null;
+    }
+    return checkpoints[checkpoints.length - 1];
+  }
+}
+
+/**
+ * 创建内存检查点保存器
+ */
+export function createMemoryCheckpointer(): MemoryCheckpointer {
+  return new MemoryCheckpointer();
+}
+
+// ============================================================
+// 传统 CheckpointManager 接口
 // ============================================================
 
 /**
@@ -238,260 +409,6 @@ class MemoryCheckpointStore implements CheckpointManager {
 }
 
 // ============================================================
-// 文件存储实现（可选）
-// ============================================================
-
-/**
- * 文件检查点存储
- */
-class FileCheckpointStore implements CheckpointManager {
-  private config: CheckpointConfig;
-  private fs: typeof import('fs');
-  private path: typeof import('path');
-
-  constructor(config?: Partial<CheckpointConfig>) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
-    this.fs = require('fs');
-    this.path = require('path');
-  }
-
-  private getCheckpointPath(projectId: string, checkpointId: string): string {
-    return this.path.join(this.config.checkpointDir, projectId, `${checkpointId}.json`);
-  }
-
-  private getMetadataPath(projectId: string): string {
-    return this.path.join(this.config.checkpointDir, projectId, 'metadata.json');
-  }
-
-  async createCheckpoint(state: ResearchState): Promise<CheckpointRecord> {
-    // 确保目录存在
-    const dir = this.path.join(this.config.checkpointDir, state.projectId);
-    if (!this.fs.existsSync(dir)) {
-      this.fs.mkdirSync(dir, { recursive: true });
-    }
-
-    const id = `checkpoint-${Date.now()}`;
-    const checksum = await computeChecksum(JSON.stringify(state));
-
-    const record: CheckpointRecord = {
-      id,
-      projectId: state.projectId,
-      state,
-      timestamp: new Date().toISOString(),
-      checksum,
-      size: JSON.stringify(state).length,
-    };
-
-    // 保存检查点文件
-    const filePath = this.getCheckpointPath(state.projectId, id);
-    this.fs.writeFileSync(filePath, JSON.stringify(record, null, 2));
-
-    // 更新元数据
-    await this.updateMetadata(state.projectId, record);
-
-    console.log(`[Checkpoint] Created file checkpoint ${id}`);
-    return record;
-  }
-
-  async restoreCheckpoint(checkpointId: string): Promise<ResearchState | null> {
-    // 查找检查点文件
-    const projects = this.fs.readdirSync(this.config.checkpointDir);
-    let foundPath: string | null = null;
-
-    for (const projectId of projects) {
-      const path = this.getCheckpointPath(projectId, checkpointId);
-      if (this.fs.existsSync(path)) {
-        foundPath = path;
-        break;
-      }
-    }
-
-    if (!foundPath) {
-      console.warn(`[Checkpoint] File checkpoint ${checkpointId} not found`);
-      return null;
-    }
-
-    const content = this.fs.readFileSync(foundPath, 'utf-8');
-    const record: CheckpointRecord = JSON.parse(content);
-
-    // 验证校验和
-    const expectedChecksum = await computeChecksum(JSON.stringify(record.state));
-    if (record.checksum !== expectedChecksum) {
-      console.error(`[Checkpoint] Checksum mismatch for ${checkpointId}`);
-      return null;
-    }
-
-    return record.state;
-  }
-
-  async getLatestCheckpoint(projectId: string): Promise<CheckpointRecord | null> {
-    const metadataPath = this.getMetadataPath(projectId);
-    if (!this.fs.existsSync(metadataPath)) {
-      return null;
-    }
-
-    const metadata: CheckpointMetadata[] = JSON.parse(this.fs.readFileSync(metadataPath, 'utf-8'));
-    if (metadata.length === 0) {
-      return null;
-    }
-
-    // 获取最新的检查点
-    const latest = metadata.sort((a, b) =>
-      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    )[0];
-
-    // 恢复状态并构建 CheckpointRecord
-    const state = await this.restoreCheckpoint(latest.id);
-    if (!state) {
-      return null;
-    }
-
-    return {
-      id: latest.id,
-      projectId: latest.projectId,
-      state,
-      timestamp: latest.timestamp,
-      checksum: latest.checksum,
-      size: latest.size,
-    };
-  }
-
-  async listCheckpoints(projectId: string): Promise<CheckpointRecord[]> {
-    const metadataPath = this.getMetadataPath(projectId);
-    if (!this.fs.existsSync(metadataPath)) {
-      return [];
-    }
-
-    const metadata: CheckpointMetadata[] = JSON.parse(this.fs.readFileSync(metadataPath, 'utf-8'));
-    const records: CheckpointRecord[] = [];
-
-    for (const meta of metadata) {
-      const record = await this.restoreCheckpoint(meta.id);
-      if (record) {
-        records.push({
-          id: meta.id,
-          projectId,
-          state: record,
-          timestamp: meta.timestamp,
-          checksum: meta.checksum,
-          size: meta.size,
-        });
-      }
-    }
-
-    return records;
-  }
-
-  async deleteCheckpoint(checkpointId: string): Promise<boolean> {
-    const projects = this.fs.readdirSync(this.config.checkpointDir);
-    let found = false;
-
-    for (const projectId of projects) {
-      const filePath = this.getCheckpointPath(projectId, checkpointId);
-      if (this.fs.existsSync(filePath)) {
-        this.fs.unlinkSync(filePath);
-        found = true;
-
-        // 更新元数据
-        await this.updateMetadata(projectId, undefined, checkpointId);
-        break;
-      }
-    }
-
-    return found;
-  }
-
-  async deleteAllCheckpoints(projectId: string): Promise<number> {
-    const dir = this.path.join(this.config.checkpointDir, projectId);
-    if (!this.fs.existsSync(dir)) {
-      return 0;
-    }
-
-    const files = this.fs.readdirSync(dir).filter((f) => f !== 'metadata.json');
-    for (const file of files) {
-      this.fs.unlinkSync(this.path.join(dir, file));
-    }
-
-    // 重置元数据
-    const metadataPath = this.getMetadataPath(projectId);
-    this.fs.writeFileSync(metadataPath, JSON.stringify([], null, 2));
-
-    return files.length;
-  }
-
-  async cleanupExpired(maxAge?: number): Promise<number> {
-    const maxAgeMs = maxAge || this.config.maxAge;
-    const cutoff = Date.now() - maxAgeMs;
-    let deleted = 0;
-
-    const projects = this.fs.readdirSync(this.config.checkpointDir);
-    for (const projectId of projects) {
-      const metadataPath = this.getMetadataPath(projectId);
-      if (!this.fs.existsSync(metadataPath)) continue;
-
-      const metadata: CheckpointMetadata[] = JSON.parse(this.fs.readFileSync(metadataPath, 'utf-8'));
-      const toDelete = metadata.filter(
-        (m) => new Date(m.timestamp).getTime() < cutoff
-      );
-
-      for (const meta of toDelete) {
-        const filePath = this.getCheckpointPath(projectId, meta.id);
-        if (this.fs.existsSync(filePath)) {
-          this.fs.unlinkSync(filePath);
-          deleted++;
-        }
-      }
-
-      // 更新元数据
-      await this.updateMetadata(
-        projectId,
-        undefined,
-        undefined,
-        metadata.filter((m) => new Date(m.timestamp).getTime() >= cutoff)
-      );
-    }
-
-    return deleted;
-  }
-
-  private async updateMetadata(
-    projectId: string,
-    record?: CheckpointRecord,
-    deleteId?: string,
-    replaceMetadata?: CheckpointMetadata[]
-  ): Promise<void> {
-    const metadataPath = this.getMetadataPath(projectId);
-    let metadata: CheckpointMetadata[] = [];
-
-    if (this.fs.existsSync(metadataPath)) {
-      try {
-        metadata = JSON.parse(this.fs.readFileSync(metadataPath, 'utf-8'));
-      } catch {
-        metadata = [];
-      }
-    }
-
-    if (replaceMetadata) {
-      metadata = replaceMetadata;
-    } else if (deleteId) {
-      metadata = metadata.filter((m) => m.id !== deleteId);
-    } else if (record) {
-      metadata.push({
-        id: record.id,
-        projectId: record.projectId,
-        timestamp: record.timestamp,
-        stateVersion: record.state.status === 'completed' ? 2 : 1,
-        nodeId: record.state.currentStep,
-        checksum: record.checksum,
-        size: record.size,
-      });
-    }
-
-    this.fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
-  }
-}
-
-// ============================================================
 // 辅助函数
 // ============================================================
 
@@ -524,21 +441,16 @@ function simpleChecksum(data: string): string {
 // ============================================================
 
 /**
- * 创建检查点管理器
+ * 创建检查点管理器（使用内存存储）
  */
 export function createCheckpointManager(config?: {
-  storage?: 'memory' | 'file';
-  checkpointDir?: string;
   maxCheckpoints?: number;
   maxAge?: number;
 }): CheckpointManager {
-  const storage = config?.storage || 'memory';
-
-  if (storage === 'file') {
-    return new FileCheckpointStore(config);
-  }
-
-  return new MemoryCheckpointStore(config);
+  return new MemoryCheckpointStore({
+    maxCheckpoints: config?.maxCheckpoints || 10,
+    maxAge: config?.maxAge || 24 * 60 * 60 * 1000,
+  });
 }
 
 // ============================================================

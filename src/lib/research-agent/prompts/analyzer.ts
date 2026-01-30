@@ -5,91 +5,60 @@
  */
 
 /** 竞品分析提示词 */
-export const COMPETITOR_ANALYSIS_PROMPT = `你是一个专业的产品分析师。请对以下产品进行深度分析：
+export const COMPETITOR_ANALYSIS_PROMPT = `你是产品分析师，请分析以下产品数据并输出 JSON 格式结果。
 
-【研究主题】
-{title}
+【产品主题】{title}
 {description}
 
-【已收集的数据】
+【数据来源】
 {extractedContent}
 
-【分析要求】
-请从以下维度进行分析：
+【任务】
+分析上述内容，提取：
+1. 核心功能（5-10个，每个用2-6个字的名词表示）
+2. 竞品信息（3-5个完整产品名称）
+3. SWOT分析（每项2-4条）
+4. 市场数据
 
-1. **功能分析**
-   - 列出核心功能（至少 5 个）
-   - 分析每个功能的特点和价值
-   - 统计功能出现频率
-
-2. **竞品分析**
-   - 识别主要竞品
-   - 分析每个竞品的市场定位
-   - 对比差异化特点
-
-3. **SWOT 分析**
-   - 优势（Strengths）
-   - 劣势（Weaknesses）
-   - 机会（Opportunities）
-   - 威胁（Threats）
-
-4. **市场数据**
-   - 市场规模和增长趋势
-   - 主要市场参与者
-   - 行业趋势
-
-5. **技术分析**
-   - 技术架构特点
-   - 使用的技术栈
-   - 技术创新点
-
-【输出要求】
-请以 JSON 格式返回分析结果：
+【输出格式要求】
+请直接输出 JSON，不要添加 \`\`\`json 标记：
 
 {{
   "features": [
-    {{
-      "name": "功能名称",
-      "count": 出现次数,
-      "sources": ["来源1", "来源2"],
-      "description": "功能特点描述"
-    }}
+    {{"name": "智能对话", "count": 5, "description": "支持多轮对话"}},
+    {{"name": "知识库", "count": 4, "description": "企业知识沉淀"}},
+    {{"name": "工单系统", "count": 3, "description": "自动创建工单"}},
+    {{"name": "数据分析", "count": 2, "description": "可视化报表"}},
+    {{"name": "多渠道接入", "count": 2, "description": "全渠道统一"}}
   ],
   "competitors": [
-    {{
-      "name": "竞品名称",
-      "industry": "所属行业",
-      "features": ["功能1", "功能2"],
-      "description": "简要描述",
-      "marketPosition": "市场定位"
-    }}
+    {{"name": "阿里云智能客服", "industry": "云服务", "features": ["智能对话", "知识库"], "marketPosition": "行业领先"}},
+    {{"name": "腾讯企点", "industry": "云服务", "features": ["在线客服", "CRM"], "marketPosition": "市场第二"}},
+    {{"name": "Zendesk", "industry": "SaaS", "features": ["工单管理", "自助服务"], "marketPosition": "国际领先"}}
   ],
   "swot": {{
-    "strengths": ["优势1", "优势2"],
-    "weaknesses": ["劣势1", "劣势2"],
-    "opportunities": ["机会1", "机会2"],
-    "threats": ["威胁1", "威胁2"]
+    "strengths": ["技术成熟", "生态完善", "品牌知名度高"],
+    "weaknesses": ["成本较高", "定制困难"],
+    "opportunities": ["AI大模型普及", "企业数字化转型"],
+    "threats": ["竞争加剧", "开源替代方案"]
   }},
   "marketData": {{
-    "marketSize": "市场规模",
-    "growthRate": "增长率",
-    "keyPlayers": ["玩家1", "玩家2"],
-    "trends": ["趋势1", "趋势2"]
+    "marketSize": "500亿元",
+    "growthRate": "25%",
+    "keyPlayers": ["阿里", "腾讯", "华为"],
+    "trends": ["大模型应用", "私有化部署"]
   }},
-  "techAnalysis": {{
-    "architecture": ["架构特点"],
-    "techStack": ["技术栈"],
-    "emergingTech": ["新兴技术"]
-  }},
-  "confidenceScore": 0.0-1.0的置信度分数,
-  "dataGaps": ["缺失的数据维度"]
+  "confidenceScore": 0.75,
+  "dataGaps": []
 }}
 
-【注意事项】
-- 如果某个维度信息不足，明确标注 dataGaps
-- 保持分析的客观性
-- 基于已有证据进行推断
-- 置信度分数反映分析的可信程度`;
+【关键规则】
+- features.name 必须是2-6个字的名词短语，如"智能对话"、"知识库"，不是句子
+- competitors.name 必须是真实产品名，如"阿里云智能客服"
+- 如果数据不足，基于行业知识补充合理内容
+- confidenceScore: 0.3-0.5=数据少, 0.5-0.7=数据中等, 0.7-1.0=数据充足`;
+
+
 
 /** 压缩内容提示 */
 export const COMPRESS_CONTENT_PROMPT = `请压缩以下内容，保留关键信息：

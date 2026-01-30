@@ -6,6 +6,7 @@
 
 import type { ProgressDetail } from '../types';
 import type { ResearchState } from '../state';
+import { projectDb } from '@/lib/db';
 import { MarkdownStateManager } from '../graph/markdown-state';
 import {
   calculateOverallProgress,
@@ -71,6 +72,9 @@ export async function updateProgress(
   // 保存到内存存储
   progressStore.set(projectId, updated);
 
+  // 同步到数据库
+  await syncToDatabase(projectId, updated);
+
   // 同步到 Markdown 状态文件
   await syncToStateFile(projectId, updated);
 
@@ -116,6 +120,21 @@ async function syncToStateFile(projectId: string, detail: ProgressDetail): Promi
     }
   } catch (error) {
     console.warn(`[Progress] Failed to sync to state file: ${error}`);
+  }
+}
+
+/**
+ * 同步进度到数据库
+ */
+async function syncToDatabase(projectId: string, detail: ProgressDetail): Promise<void> {
+  try {
+    projectDb.updateProgress.run({
+      id: projectId,
+      progress: detail.percentage,
+      progress_message: `${detail.step}: ${detail.currentItem}`,
+    });
+  } catch (error) {
+    console.warn(`[Progress] Failed to sync to database: ${error}`);
   }
 }
 

@@ -246,20 +246,46 @@ async function generateAnalysis(
   const marketData = (response.marketData || {}) as Record<string, unknown>;
   const dataGaps = (response.dataGaps || []) as string[];
 
-  return {
-    features: features.map((f) => ({
-      name: f.name || '',
+  // 过滤无效的功能名称：
+  // - 长度在 2-20 字符之间
+  // - 不是表格分隔符（含有 |、---）
+  // - 不以特殊符号开头
+  // - 不是纯符号或数字
+  const validFeatures = features
+    .filter((f) => {
+      const name = f.name?.trim();
+      if (!name || name.length < 2 || name.length > 20) return false;
+      if (name.includes('|') || name.includes('---')) return false;
+      if (/^[*#\-|\s\d]+$/.test(name)) return false;
+      return true;
+    })
+    .map((f) => ({
+      name: f.name.replace(/^[\*\s]+/, '').trim(),
       count: f.count || 1,
       sources: f.sources || [],
       description: f.description || '',
-    })),
-    competitors: competitors.map((c) => ({
-      name: c.name || '',
+    }));
+
+  // 过滤无效的竞品名称
+  const validCompetitors = competitors
+    .filter((c) => {
+      const name = c.name?.trim();
+      if (!name || name.length < 2 || name.length > 30) return false;
+      if (name.includes('|') || name.includes('---')) return false;
+      if (/^[*#\-|\s\d]+$/.test(name)) return false;
+      return true;
+    })
+    .map((c) => ({
+      name: c.name.replace(/^[\*\s]+/, '').trim(),
       industry: c.industry || '',
       features: c.features || [],
       description: c.description || '',
       marketPosition: c.marketPosition || '',
-    })),
+    }));
+
+  return {
+    features: validFeatures,
+    competitors: validCompetitors,
     swot: {
       strengths: (swot.strengths as string[]) || [],
       weaknesses: (swot.weaknesses as string[]) || [],

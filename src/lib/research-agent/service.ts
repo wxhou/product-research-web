@@ -2,14 +2,21 @@
  * 研究服务模块
  *
  * 提供 API 与多代理架构之间的桥梁
+ *
+ * 使用 LangGraph 风格的 StateGraph 进行工作流编排
  */
 
 import type { ResearchState } from './state';
 import type { AgentName } from './types';
-import { createSupervisorAgent, SupervisorDecision } from './supervisor';
-import { createCheckpointManager } from './graph/checkpoint';
-import { MarkdownStateManager } from './graph/markdown-state';
-import { createDefaultResearchGraph } from './graph/builder';
+import type { SupervisorDecision } from './supervisor';
+import type { CompiledGraph, GraphExecutionResult } from './graph';
+import type { LangGraphCheckpointConfig } from './graph/checkpoint';
+import {
+  createResearchGraph,
+  createSimpleResearchGraph,
+} from './graph/builder';
+import { createMemoryCheckpointer } from './graph/checkpoint';
+import { createSupervisorAgent } from './supervisor';
 
 // ============================================================
 // 类型定义
@@ -48,9 +55,7 @@ export interface TaskStatusResponse {
  */
 export interface ResearchTaskExecutor {
   config: ResearchTaskConfig;
-  stateManager: MarkdownStateManager;
-  checkpointManager: ReturnType<typeof createCheckpointManager>;
-  supervisor: ReturnType<typeof createSupervisorAgent>;
+  compiledGraph: CompiledGraph<ResearchState>;
 
   /**
    * 开始执行研究任务
@@ -58,7 +63,7 @@ export interface ResearchTaskExecutor {
   start(): Promise<ResearchState>;
 
   /**
-   * 执行下一个步骤
+   * 执行下一个步骤（单步执行）
    */
   executeStep(): Promise<ResearchState>;
 
@@ -79,20 +84,11 @@ export interface ResearchTaskExecutor {
 
 /**
  * 创建研究任务执行器
+ *
+ * 使用 LangGraph 风格的 StateGraph 进行编排
  */
 export function createResearchTaskExecutor(config: ResearchTaskConfig): ResearchTaskExecutor {
-  const stateManager = new MarkdownStateManager({
-    stateDir: 'task-data',
-    enableCompression: true,
-    maxFileSize: 10 * 1024 * 1024,
-  });
-
-  const checkpointManager = createCheckpointManager({
-    storage: 'memory',
-    maxCheckpoints: 10,
-    maxAge: 24 * 60 * 60 * 1000,
-  });
-
+  const checkpointer = createMemoryCheckpointer();
   const supervisor = createSupervisorAgent({
     useLLMRouting: true,
     maxRetries: 3,
@@ -105,26 +101,49 @@ export function createResearchTaskExecutor(config: ResearchTaskConfig): Research
     },
   });
 
+  // 创建编译后的图
+  const compiledGraph = createResearchGraph(
+    {
+      planner: createPlannerNode(config),
+      searcher: createSearcherNode(config),
+      extractor: createExtractorNode(config),
+      analyzer: createAnalyzerNode(config),
+      reporter: createReporterNode(config),
+      supervisor: createSupervisorNode(supervisor),
+    },
+    {
+      nodeTimeout: 300000, // 5 分钟
+      maxIterations: 20,
+      checkpointer,
+    }
+  );
+
   return {
     config,
-    stateManager,
-    checkpointManager,
-    supervisor,
+    compiledGraph,
 
     async start(): Promise<ResearchState> {
+      console.log(`[ResearchService] Starting task for project ${config.projectId}`);
+      
       // 检查是否已有状态（断点续传）
-      const existingState = await stateManager.readState(config.projectId);
-      if (existingState) {
+      const checkpoint = await checkpointer.get({
+        threadId: config.projectId,
+      });
+
+      if (checkpoint) {
         console.log(`[ResearchService] Resuming task for project ${config.projectId}`);
         return this.executeStep();
       }
 
+      console.log(`[ResearchService] Creating initial state for project ${config.projectId}`);
       // 创建初始状态
       const initialState: ResearchState = {
         projectId: config.projectId,
         title: config.title,
+        description: config.description,
+        keywords: config.keywords,
         status: 'pending',
-        currentStep: 'planner',
+        currentStep: 'supervisor',  // 从 supervisor 开始，让它决定下一步
         progress: 0,
         progressMessage: '正在初始化研究任务...',
         progressDetail: undefined,
@@ -149,57 +168,76 @@ export function createResearchTaskExecutor(config: ResearchTaskConfig): Research
         completedAt: undefined,
         retryCount: 0,
         maxRetries: 3,
-        keywords: config.keywords,
       };
 
-      // 保存初始状态
-      await stateManager.writeState(initialState);
+      // 执行图
+      console.log(`[ResearchService] Invoking graph with initial state: status=${initialState.status}, currentStep=${initialState.currentStep}`);
+      const result = await this.compiledGraph.invoke(initialState, {
+        threadId: config.projectId,
+      });
 
-      return this.executeStep();
+      console.log(`[ResearchService] Graph execution completed: status=${result.finalState.status}, iterations=${result.iterations}, path=${result.executionPath.join('->')}`);
+      return result.finalState;
     },
 
     async executeStep(): Promise<ResearchState> {
-      // 读取当前状态
-      let state = await stateManager.readState(config.projectId);
-      if (!state) {
-        throw new Error('Task not found');
+      // 获取当前状态
+      const checkpoint = await checkpointer.get({
+        threadId: config.projectId,
+      });
+
+      if (!checkpoint) {
+        throw new Error('Task not found. Call start() first.');
       }
+
+      const currentState = checkpoint.checkpoint;
 
       // 如果已完成，直接返回
-      if (state.status === 'completed' || state.status === 'failed') {
-        return state;
+      if (currentState.status === 'completed' || currentState.status === 'failed') {
+        return currentState;
       }
 
-      // 获取 Supervisor 决策
-      const decision = await supervisor.makeDecision(state);
+      // 手动执行下一个节点
+      const nextNodeId = this.compiledGraph.getNextNode(currentState);
 
-      if (!decision.shouldContinue) {
-        // 任务完成
-        state = {
-          ...state,
-          status: 'completed',
-          progress: 100,
-          progressMessage: '研究任务已完成',
-          completedAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        await stateManager.writeState(state);
-        return state;
+      if (!nextNodeId) {
+        return currentState;
       }
 
-      // 根据决策执行相应 Agent
-      const nextAgent = decision.nextAgent as AgentName;
-      state = await executeAgent(state, nextAgent);
+      // 执行节点
+      const node = this.compiledGraph.nodes.get(nextNodeId);
+      if (!node) {
+        throw new Error(`Node not found: ${nextNodeId}`);
+      }
 
-      return state;
+      // 执行节点函数
+      const nodeResult = await Promise.resolve(node.fn(currentState));
+
+      // 更新状态
+      const newState = {
+        ...currentState,
+        ...nodeResult,
+        updatedAt: new Date().toISOString(),
+      };
+
+      // 保存检查点
+      await checkpointer.put(newState, {
+        threadId: config.projectId,
+      });
+
+      return newState;
     },
 
     async getStatus(): Promise<TaskStatusResponse> {
-      const state = await stateManager.readState(config.projectId);
-      if (!state) {
+      const checkpoint = await checkpointer.get({
+        threadId: config.projectId,
+      });
+
+      if (!checkpoint) {
         throw new Error('Task not found');
       }
 
+      const state = checkpoint.checkpoint;
       return {
         projectId: state.projectId,
         title: state.title,
@@ -215,69 +253,91 @@ export function createResearchTaskExecutor(config: ResearchTaskConfig): Research
     },
 
     async cancel(): Promise<boolean> {
-      // 标记任务为已取消
-      const state = await stateManager.readState(config.projectId);
-      if (!state) {
+      const checkpoint = await checkpointer.get({
+        threadId: config.projectId,
+      });
+
+      if (!checkpoint) {
         return false;
       }
 
+      const state = checkpoint.checkpoint;
       const updatedState: ResearchState = {
         ...state,
-        status: 'failed',
-        progress: state.progress,
+        status: 'cancelled',
         progressMessage: '任务已取消',
         updatedAt: new Date().toISOString(),
       };
 
-      return stateManager.writeState(updatedState);
+      await checkpointer.put(updatedState, {
+        threadId: config.projectId,
+      });
+
+      return true;
     },
   };
 }
 
+// ============================================================
+// 节点函数工厂
+// ============================================================
+
 /**
- * 执行指定 Agent
+ * 创建 Planner 节点
  */
-async function executeAgent(state: ResearchState, agentName: AgentName): Promise<ResearchState> {
-  // 根据当前状态更新为对应的执行状态
-  const statusMap: Record<AgentName, ResearchState['status']> = {
-    planner: 'planning',
-    searcher: 'searching',
-    extractor: 'extracting',
-    analyzer: 'analyzing',
-    reporter: 'reporting',
-  };
+function createPlannerNode(config: ResearchTaskConfig): (state: ResearchState) => Promise<Partial<ResearchState>> {
+  return async (state: ResearchState) => {
+    console.log(`[Planner] Generating research plan for ${config.projectId}`);
 
-  const newStatus = statusMap[agentName];
-
-  // 动态导入对应的 Agent 并执行
-  switch (agentName) {
-    case 'planner': {
+    // 使用实际的 Planner Agent
+    try {
       const { createPlannerAgent } = await import('./workers/planner');
       const agent = createPlannerAgent();
       const result = await agent.execute(state);
+
       if (result.success && result.searchPlan) {
         return {
-          ...state,
-          status: newStatus,
-          currentStep: 'planner',
+          status: 'searching' as const,
+          currentStep: 'searcher' as AgentName,
           progress: 10,
           progressMessage: `计划生成完成，共 ${result.searchPlan.queries.length} 个搜索查询`,
+          searchPlan: result.searchPlan,
           pendingQueries: result.searchPlan.queries,
-          keywords: state.keywords,
           updatedAt: new Date().toISOString(),
         };
       }
-      return { ...state, status: 'failed', progressMessage: result.error || '规划失败' };
+
+      return {
+        status: 'failed' as const,
+        progressMessage: result.error || '规划失败',
+        updatedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      return {
+        status: 'failed' as const,
+        progressMessage: `规划失败: ${(error as Error).message}`,
+        updatedAt: new Date().toISOString(),
+      };
     }
-    case 'searcher': {
+  };
+}
+
+/**
+ * 创建 Searcher 节点
+ */
+function createSearcherNode(config: ResearchTaskConfig): (state: ResearchState) => Promise<Partial<ResearchState>> {
+  return async (state: ResearchState) => {
+    console.log(`[Searcher] Executing searches for ${config.projectId}`);
+
+    try {
       const { createSearcherAgent } = await import('./workers/searcher');
       const agent = createSearcherAgent();
       const result = await agent.execute(state);
+
       if (result.success) {
         return {
-          ...state,
-          status: newStatus,
-          currentStep: 'searcher',
+          status: 'extracting' as const,
+          currentStep: 'extractor' as AgentName,
           progress: Math.min(30, 10 + (state.searchResults.length / 15) * 20),
           progressMessage: `已完成 ${state.searchResults.length} 条搜索结果`,
           searchResults: result.searchResults || state.searchResults,
@@ -286,29 +346,72 @@ async function executeAgent(state: ResearchState, agentName: AgentName): Promise
           updatedAt: new Date().toISOString(),
         };
       }
-      return { ...state, status: 'failed', progressMessage: result.error || '搜索失败' };
+
+      return {
+        status: 'failed' as const,
+        progressMessage: result.error || '搜索失败',
+        updatedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      return {
+        status: 'failed' as const,
+        progressMessage: `搜索失败: ${(error as Error).message}`,
+        updatedAt: new Date().toISOString(),
+      };
     }
-    case 'extractor': {
+  };
+}
+
+/**
+ * 创建 Extractor 节点
+ */
+function createExtractorNode(config: ResearchTaskConfig): (state: ResearchState) => Promise<Partial<ResearchState>> {
+  return async (state: ResearchState) => {
+    console.log(`[Extractor] Extracting content for ${config.projectId}`);
+
+    try {
       const { createExtractorAgent } = await import('./workers/extractor');
       const agent = createExtractorAgent();
       const result = await agent.execute(state);
+
       if (result.success) {
         return {
-          ...state,
-          status: newStatus,
-          currentStep: 'extractor',
+          status: 'analyzing' as const,
+          currentStep: 'analyzer' as AgentName,
           progress: Math.min(60, 30 + (state.extractedContent.length / 5) * 30),
           progressMessage: `已提取 ${state.extractedContent.length} 个页面内容`,
           extractedContent: result.extractedContent || state.extractedContent,
           updatedAt: new Date().toISOString(),
         };
       }
-      return { ...state, status: 'failed', progressMessage: result.error || '提取失败' };
+
+      return {
+        status: 'failed' as const,
+        progressMessage: result.error || '提取失败',
+        updatedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      return {
+        status: 'failed' as const,
+        progressMessage: `提取失败: ${(error as Error).message}`,
+        updatedAt: new Date().toISOString(),
+      };
     }
-    case 'analyzer': {
+  };
+}
+
+/**
+ * 创建 Analyzer 节点
+ */
+function createAnalyzerNode(config: ResearchTaskConfig): (state: ResearchState) => Promise<Partial<ResearchState>> {
+  return async (state: ResearchState) => {
+    console.log(`[Analyzer] Analyzing content for ${config.projectId}`);
+
+    try {
       const { createAnalyzerAgent } = await import('./workers/analyzer');
       const agent = createAnalyzerAgent();
       const result = await agent.execute(state);
+
       if (result.success && result.analysis) {
         // 从分析结果中提取引用
         const citations = state.extractedContent.map((ext, index) => ({
@@ -321,9 +424,8 @@ async function executeAgent(state: ResearchState, agentName: AgentName): Promise
         }));
 
         return {
-          ...state,
-          status: newStatus,
-          currentStep: 'analyzer',
+          status: 'reporting' as const,
+          currentStep: 'reporter' as AgentName,
           progress: Math.min(85, 60 + (result.analysis.confidenceScore * 25)),
           progressMessage: '分析完成',
           analysis: result.analysis,
@@ -331,28 +433,100 @@ async function executeAgent(state: ResearchState, agentName: AgentName): Promise
           updatedAt: new Date().toISOString(),
         };
       }
-      return { ...state, status: 'failed', progressMessage: result.error || '分析失败' };
+
+      return {
+        status: 'failed' as const,
+        progressMessage: result.error || '分析失败',
+        updatedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      return {
+        status: 'failed' as const,
+        progressMessage: `分析失败: ${(error as Error).message}`,
+        updatedAt: new Date().toISOString(),
+      };
     }
-    case 'reporter': {
+  };
+}
+
+/**
+ * 创建 Reporter 节点
+ */
+function createReporterNode(config: ResearchTaskConfig): (state: ResearchState) => Promise<Partial<ResearchState>> {
+  return async (state: ResearchState) => {
+    console.log(`[Reporter] Generating report for ${config.projectId}`);
+
+    try {
       const { createReporterAgent } = await import('./workers/reporter');
       const agent = createReporterAgent();
       const result = await agent.execute(state);
-      if (result.success && result.report) {
+
+      if (result.success) {
         return {
-          ...state,
-          status: 'completed',
-          currentStep: 'reporter',
+          status: 'completed' as const,
+          currentStep: 'reporter' as AgentName,
           progress: 100,
           progressMessage: '研究报告生成完成',
+          report: result.report, // 返回报告内容
+          reportPath: result.reportPath, // 返回报告路径
           completedAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
       }
-      return { ...state, status: 'failed', progressMessage: result.error || '报告生成失败' };
+
+      return {
+        status: 'failed' as const,
+        progressMessage: result.error || '报告生成失败',
+        updatedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      return {
+        status: 'failed' as const,
+        progressMessage: `报告生成失败: ${(error as Error).message}`,
+        updatedAt: new Date().toISOString(),
+      };
     }
-    default:
-      return state;
-  }
+  };
+}
+
+/**
+ * 创建 Supervisor 节点
+ */
+function createSupervisorNode(
+  supervisor: ReturnType<typeof createSupervisorAgent>
+): (state: ResearchState) => Promise<Partial<ResearchState>> {
+  return async (state: ResearchState) => {
+    console.log(`[Supervisor] Making routing decision for currentStep=${state.currentStep}, status=${state.status}`);
+
+    const decision = await supervisor.makeDecision(state);
+    console.log(`[Supervisor] Decision: nextAgent=${decision.nextAgent}, shouldContinue=${decision.shouldContinue}, reason=${decision.reason}`);
+
+    if (!decision.shouldContinue || decision.nextAgent === 'done') {
+      return {
+        currentStep: 'done' as const,
+        status: 'completed' as const,
+        progressMessage: decision.reason || '任务完成',
+        completedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+    }
+
+    // 根据决策更新状态
+    const statusMap: Record<string, ResearchState['status']> = {
+      planner: 'planning',
+      searcher: 'searching',
+      extractor: 'extracting',
+      analyzer: 'analyzing',
+      reporter: 'reporting',
+    };
+
+    return {
+      currentStep: decision.nextAgent as AgentName,
+      status: statusMap[decision.nextAgent] || 'planning',
+      progressMessage: decision.reason,
+      updatedAt: new Date().toISOString(),
+    };
+  };
 }
 
 // ============================================================
@@ -363,15 +537,16 @@ async function executeAgent(state: ResearchState, agentName: AgentName): Promise
  * 获取任务状态
  */
 export async function getResearchTaskStatus(projectId: string): Promise<TaskStatusResponse | null> {
-  const stateManager = new MarkdownStateManager({
-    stateDir: 'task-data',
+  const checkpointer = createMemoryCheckpointer();
+  const checkpoint = await checkpointer.get({
+    threadId: projectId,
   });
 
-  const state = await stateManager.readState(projectId);
-  if (!state) {
+  if (!checkpoint) {
     return null;
   }
 
+  const state = checkpoint.checkpoint;
   return {
     projectId: state.projectId,
     title: state.title,
@@ -390,28 +565,46 @@ export async function getResearchTaskStatus(projectId: string): Promise<TaskStat
  * 列出所有研究任务
  */
 export function listResearchTasks(): string[] {
-  const stateManager = new MarkdownStateManager({
-    stateDir: 'task-data',
-  });
-  return stateManager.listStates();
+  // 由于使用内存存储，这里无法列出所有任务
+  console.warn('[ResearchService] listResearchTasks requires persistent storage');
+  return [];
 }
 
 /**
  * 删除研究任务
  */
 export async function deleteResearchTask(projectId: string): Promise<boolean> {
-  const stateManager = new MarkdownStateManager({
-    stateDir: 'task-data',
+  const checkpointer = createMemoryCheckpointer();
+  const checkpoint = await checkpointer.get({
+    threadId: projectId,
   });
-  return stateManager.deleteState(projectId);
+
+  if (!checkpoint) {
+    return false;
+  }
+
+  // 删除所有检查点
+  for await (const cp of checkpointer.list({
+    threadId: projectId,
+  })) {
+    const checkpointId = cp.config.configurable.checkpoint_id;
+    if (checkpointId) {
+      await checkpointer.delete(checkpointId, {
+        threadId: projectId,
+      });
+    }
+  }
+
+  return true;
 }
 
 /**
  * 检查任务是否存在
  */
-export function researchTaskExists(projectId: string): boolean {
-  const stateManager = new MarkdownStateManager({
-    stateDir: 'task-data',
+export async function researchTaskExists(projectId: string): Promise<boolean> {
+  const checkpointer = createMemoryCheckpointer();
+  const checkpoint = await checkpointer.get({
+    threadId: projectId,
   });
-  return stateManager.exists(projectId);
+  return !!checkpoint;
 }

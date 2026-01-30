@@ -18,6 +18,45 @@ import type {
 } from './types';
 
 // ============================================================
+// Checkpoint 类型 (LangGraph 风格)
+// ============================================================
+
+/**
+ * 检查点配置
+ */
+export interface StateCheckpointConfig {
+  configurable: {
+    thread_id: string;
+    checkpoint_id?: string;
+  };
+}
+
+/**
+ * 检查点元数据
+ */
+export interface CheckpointMetadata {
+  source: string;
+  created_at: string;
+  [key: string]: unknown;
+}
+
+/**
+ * 检查点
+ *
+ * 对应 LangGraph 的 Checkpoint 接口
+ */
+export interface Checkpoint {
+  /** 检查点配置 */
+  config: StateCheckpointConfig;
+  /** 检查点保存的状态 */
+  checkpoint: ResearchState;
+  /** 元数据 */
+  metadata: CheckpointMetadata;
+  /** 父检查点 ID（用于版本历史） */
+  parentCheckpointId?: string;
+}
+
+// ============================================================
 // 核心状态接口
 // ============================================================
 
@@ -64,6 +103,10 @@ export interface ResearchState {
 
   // 报告阶段产物
   citations: Citation[];
+
+  // 报告内容
+  report?: string;
+  reportPath?: string;
 
   // 时间戳
   startedAt: string;

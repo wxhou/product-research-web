@@ -502,25 +502,46 @@ class DevToService implements SearchService {
   type = 'devto' as DataSourceType;
 
   async search(query: string, limit = 10): Promise<SearchResult[]> {
-    try {
-      const res = await fetch(
-        `https://dev.to/api/articles?tag=${encodeURIComponent(query)}&per_page=${limit}`,
-        { signal: AbortSignal.timeout(15000) }
-      );
-      if (!res.ok) throw new Error(`Dev.to API error: ${res.status}`);
+    const maxRetries = 3;
+    const baseDelay = 1000;
 
-      const data = await res.json();
-      return (data || []).slice(0, limit).map((item: any) => ({
-        title: item.title || query,
-        url: item.url || item.canonical_url || '',
-        content: item.description || item.title || '',
-        source: 'devto',
-        publishedAt: item.published_at,
-      }));
-    } catch (error) {
-      console.error('Dev.to Search error:', error);
-      return [];
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const res = await fetch(
+          `https://dev.to/api/articles?tag=${encodeURIComponent(query)}&per_page=${limit}`,
+          { signal: AbortSignal.timeout(15000) }
+        );
+
+        if (res.status === 429) {
+          const delay = baseDelay * Math.pow(2, attempt);
+          console.log(`Dev.to rate limited, waiting ${delay}ms before retry...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        if (!res.ok) {
+          console.log(`Dev.to API error: ${res.status}`);
+          return [];
+        }
+
+        const data = await res.json();
+        return (data || []).slice(0, limit).map((item: any) => ({
+          title: item.title || query,
+          url: item.url || item.canonical_url || '',
+          content: item.description || item.title || '',
+          source: 'devto',
+          publishedAt: item.published_at,
+        }));
+      } catch (error) {
+        if (attempt === maxRetries - 1) {
+          console.error('Dev.to Search error:', error);
+          return [];
+        }
+        const delay = baseDelay * Math.pow(2, attempt);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
     }
+    return [];
   }
 }
 

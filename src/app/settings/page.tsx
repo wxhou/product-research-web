@@ -107,8 +107,16 @@ export default function SettingsPage() {
     provider: string;
     modelName: string;
     apiKey?: string;
+    baseUrl?: string;
     temperature: number;
+    timeout: number;
   } | null>(null);
+  const [llmBaseUrl, setLlmBaseUrl] = useState('');
+  const [llmApiKey, setLlmApiKey] = useState('');
+  const [llmModelName, setLlmModelName] = useState('');
+  const [llmTemperature, setLlmTemperature] = useState(0.7);
+  const [llmTimeout, setLlmTimeout] = useState(120);
+  const [llmSaving, setLlmSaving] = useState(false);
   // Crawl4AI 配置状态
   const [crawl4aiConfig, setCrawl4aiConfig] = useState<{
     url: string;
@@ -215,10 +223,48 @@ export default function SettingsPage() {
         const config = data.data;
         setLlmConfig(config);
         // 更新表单状态
-        setSelectedProvider(config.provider || 'modelscope');
+        setSelectedProvider(config.provider || 'ollama');
+        setLlmBaseUrl(config.baseUrl || '');
+        setLlmApiKey(config.apiKey || '');
+        setLlmModelName(config.modelName || '');
+        setLlmTemperature(config.temperature ?? 0.7);
+        setLlmTimeout(config.timeout ?? 120);
       }
     } catch (error) {
       console.error('Failed to fetch LLM config:', error);
+    }
+  };
+
+  // 保存 LLM 配置
+  const saveLLMConfig = async () => {
+    setLlmSaving(true);
+    try {
+      const config = {
+        provider: selectedProvider,
+        baseUrl: llmBaseUrl || null,
+        apiKey: llmApiKey || null,
+        modelName: llmModelName || null,
+        temperature: llmTemperature,
+        timeout: llmTimeout,
+      };
+      const res = await fetch('/api/settings/llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showMessage('success', '配置保存成功');
+        // 重新加载配置
+        await fetchLLMConfig();
+      } else {
+        showMessage('error', '保存失败: ' + (data.error || '未知错误'));
+      }
+    } catch (error) {
+      console.error('Failed to save LLM config:', error);
+      showMessage('error', '保存失败');
+    } finally {
+      setLlmSaving(false);
     }
   };
 
@@ -471,10 +517,12 @@ export default function SettingsPage() {
               className="input"
               id="base-url"
               placeholder="https://your-custom-api.com/v1"
+              value={llmBaseUrl}
+              onChange={(e) => setLlmBaseUrl(e.target.value)}
             />
           </div>
 
-          <div className="preference-item">
+          <div className="preference-item" id="api-key-item" style={{ display: selectedProvider === 'ollama' ? 'none' : 'flex' }}>
             <div className="preference-info">
               <div className="preference-icon">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -487,15 +535,15 @@ export default function SettingsPage() {
                 <p>输入您的 API Key 以启用 AI 功能</p>
               </div>
             </div>
-            <div className="api-key-input">
-              <input
-                type="password"
-                className="input"
-                id="api-key"
-                placeholder="sk-..."
-              />
-              <button className="btn btn-primary" id="save-llm">保存</button>
-            </div>
+            <input
+              type="password"
+              className="input"
+              id="api-key"
+              placeholder="sk-..."
+              style={{ flex: 1, maxWidth: '400px' }}
+              value={llmApiKey}
+              onChange={(e) => setLlmApiKey(e.target.value)}
+            />
           </div>
 
           <div className="preference-item">
@@ -508,26 +556,18 @@ export default function SettingsPage() {
               </div>
               <div>
                 <h3>模型名称</h3>
-                <p>{selectedProvider === 'compatible' ? '输入自定义模型名称' : '选择要使用的模型'}</p>
+                <p>输入要使用的模型名称</p>
               </div>
             </div>
-            {selectedProvider === 'compatible' ? (
-              <input
-                type="text"
-                className="input"
-                id="model-name"
-                placeholder="如: gpt-4o, claude-3-5-sonnet"
-              />
-            ) : (
-              <select className="input select" id="model-name">
-                {MODEL_OPTIONS[selectedProvider]?.map((model) => (
-                  <option key={model.value} value={model.value}>
-                    {model.label}
-                    {model.desc ? ` - ${model.desc}` : ''}
-                  </option>
-                ))}
-              </select>
-            )}
+            <input
+              type="text"
+              className="input"
+              id="model-name"
+              placeholder={selectedProvider === 'ollama' ? '如: llama3.2, qwen2.5' : selectedProvider === 'compatible' ? '如: gpt-4o, claude-3-5-sonnet' : '输入模型名称'}
+              style={{ flex: 1, maxWidth: '400px' }}
+              value={llmModelName}
+              onChange={(e) => setLlmModelName(e.target.value)}
+            />
           </div>
 
           <div className="preference-item">
@@ -550,9 +590,10 @@ export default function SettingsPage() {
                 min="0"
                 max="2"
                 step="0.1"
-                defaultValue="0.7"
+                value={llmTemperature}
+                onChange={(e) => setLlmTemperature(parseFloat(e.target.value))}
               />
-              <span className="slider-value" id="temperature-value">0.7</span>
+              <span className="slider-value" id="temperature-value">{llmTemperature}</span>
             </div>
           </div>
 
@@ -569,171 +610,29 @@ export default function SettingsPage() {
                 <p>API 请求超时 (秒)</p>
               </div>
             </div>
-            <input
-              type="number"
-              className="input"
-              id="timeout"
-              min="30"
-              max="300"
-              defaultValue="120"
-              style={{ width: '100px' }}
-            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <input
+                type="number"
+                className="input"
+                id="timeout"
+                min="30"
+                max="300"
+                value={llmTimeout}
+                onChange={(e) => setLlmTimeout(parseInt(e.target.value) || 120)}
+                style={{ width: '100px' }}
+              />
+              <button 
+                className="btn btn-primary" 
+                id="save-llm"
+                onClick={saveLLMConfig}
+                disabled={llmSaving}
+              >
+                {llmSaving ? '保存中...' : '保存配置'}
+              </button>
+            </div>
           </div>
         </div>
       </section>
-
-      <script dangerouslySetInnerHTML={{
-        __html: `
-          (function() {
-            const provider = document.getElementById('provider');
-            const baseUrlItem = document.getElementById('base-url-item');
-            const saveBtn = document.getElementById('save-llm');
-            const tempSlider = document.getElementById('temperature');
-            const tempValue = document.getElementById('temperature-value');
-
-            // 显示/隐藏自定义 API 地址输入框
-            function updateBaseUrlVisibility() {
-              if (provider.value === 'compatible' || provider.value === 'azure') {
-                baseUrlItem.style.display = 'flex';
-              } else {
-                baseUrlItem.style.display = 'none';
-              }
-            }
-
-            provider.addEventListener('change', updateBaseUrlVisibility);
-
-            // 温度滑块值更新
-            tempSlider.addEventListener('input', function() {
-              tempValue.textContent = this.value;
-            });
-
-            // 加载保存的配置
-            async function loadConfig() {
-              try {
-                const res = await fetch('/api/settings/llm');
-                const data = await res.json();
-                if (data.success && data.data) {
-                  const config = data.data;
-                  if (config.provider) provider.value = config.provider;
-                  if (config.baseUrl) document.getElementById('base-url').value = config.baseUrl;
-                  if (config.apiKey) document.getElementById('api-key').value = config.apiKey;
-                  if (config.modelName) document.getElementById('model-name').value = config.modelName;
-                  if (config.temperature) {
-                    tempSlider.value = config.temperature;
-                    tempValue.textContent = config.temperature;
-                  }
-                  if (config.timeout) document.getElementById('timeout').value = config.timeout;
-
-                  // 更新当前使用模型的显示
-                  const currentModelBadge = document.querySelector('.current-model-badge');
-                  if (config.modelName) {
-                    if (currentModelBadge) {
-                      const modelSpan = currentModelBadge.querySelector('span');
-                      if (modelSpan) {
-                        const tempStr = config.temperature && config.temperature !== 0.7 ? ' (温度: ' + config.temperature + ')' : '';
-                        modelSpan.innerHTML = '当前使用: <strong>' + config.modelName + '</strong>' + tempStr;
-                      }
-                    } else {
-                      // 动态创建 badge
-                      const sectionHeader = document.querySelector('.section-header');
-                      if (sectionHeader) {
-                        const badge = document.createElement('div');
-                        badge.className = 'current-model-badge';
-                        badge.innerHTML = \`
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="3" />
-                            <path d="M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6M4.22 19.78l4.24-4.24M15.54 8.46l4.24-4.24" />
-                          </svg>
-                          <span>当前使用: <strong>\${config.modelName}</strong></span>
-                        \`;
-                        sectionHeader.appendChild(badge);
-                      }
-                    }
-                  }
-                }
-              } catch (e) {
-                console.error('Failed to load LLM config:', e);
-              }
-            }
-
-            // 保存配置
-            async function saveConfig() {
-              const config = {
-                provider: provider.value,
-                baseUrl: document.getElementById('base-url').value || null,
-                apiKey: document.getElementById('api-key').value || null,
-                modelName: document.getElementById('model-name').value || null,
-                temperature: parseFloat(tempSlider.value),
-                timeout: parseInt(document.getElementById('timeout').value) || 120,
-              };
-
-              try {
-                const res = await fetch('/api/settings/llm', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(config),
-                });
-                const data = await res.json();
-                if (data.success) {
-                  // 重新加载配置并更新页面显示
-                  await loadConfig();
-                  alert('保存成功');
-                } else {
-                  alert('保存失败: ' + data.error);
-                }
-              } catch (e) {
-                alert('保存失败');
-              }
-            }
-
-            saveBtn.addEventListener('click', saveConfig);
-
-            // 加载配置
-            function loadConfig() {
-              // 从 localStorage 读取已保存的配置
-              const savedConfig = localStorage.getItem('llm_config');
-              if (savedConfig) {
-                try {
-                  const config = JSON.parse(savedConfig);
-                  document.getElementById('base-url').value = config.baseUrl || '';
-                  document.getElementById('api-key').value = config.apiKey || '';
-                  // 填充额外的模型配置
-                  const modelConfigs = config.modelConfigs || {};
-                  for (const [provider, cfg] of Object.entries(modelConfigs)) {
-                    const baseUrlInput = document.getElementById('base-url-' + provider);
-                    const apiKeyInput = document.getElementById('api-key-' + provider);
-                    if (baseUrlInput) baseUrlInput.value = cfg.baseUrl || '';
-                    if (apiKeyInput) apiKeyInput.value = cfg.apiKey || '';
-                  }
-                } catch (e) {
-                  console.error('Failed to parse saved config:', e);
-                }
-              }
-              // 从 localStorage 读取其他设置
-              const reportLang = localStorage.getItem('report_language');
-              if (reportLang) {
-                const select = document.querySelector('.preference-card .select');
-                if (select) select.value = reportLang;
-              }
-            }
-
-            // 更新 Base URL 输入框可见性
-            function updateBaseUrlVisibility() {
-              const selectedProvider = document.getElementById('provider-select')?.value;
-              const baseUrlGroup = document.getElementById('base-url-group');
-              if (baseUrlGroup) {
-                baseUrlGroup.style.display = selectedProvider === 'custom' ? 'block' : 'none';
-              }
-            }
-
-            // 初始化
-            loadConfig();
-            updateBaseUrlVisibility();
-          })();
-          `
-        }}
-      />
-
 
       <section className="settings-section">
         <h2>应用偏好</h2>

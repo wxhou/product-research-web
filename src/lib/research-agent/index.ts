@@ -55,7 +55,7 @@ export interface RunResearchAgentOptions {
  */
 export async function runResearchAgent(
   options: RunResearchAgentOptions
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; report?: string; reportPath?: string; error?: string }> {
   const { projectId, title, description, keywords, userId, onProgress, onComplete, onError } = options;
 
   try {
@@ -68,19 +68,23 @@ export async function runResearchAgent(
       userId,
     });
 
-    // 监听进度变化
-    const status = await executor.getStatus();
-    onProgress?.(status.progress, status.progressMessage);
+    // 发送初始进度（任务还未创建，不能调用 getStatus）
+    onProgress?.(0, '正在初始化研究任务...');
 
-    // 开始执行
+    // 开始执行（这会创建初始状态并执行图）
     const finalState = await executor.start();
 
-    // 保存最终状态
+    // 保存最终进度
     onProgress?.(finalState.progress, finalState.progressMessage);
 
     if (finalState.status === 'completed') {
-      onComplete?.({ success: true });
-      return { success: true };
+      const result = {
+        success: true,
+        report: finalState.report, // 报告内容
+        reportPath: finalState.reportPath, // 报告文件路径
+      };
+      onComplete?.(result);
+      return result;
     } else {
       const error = new Error(finalState.progressMessage || '研究任务失败');
       onError?.(error);

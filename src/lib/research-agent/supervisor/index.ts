@@ -213,11 +213,16 @@ async function makeRoutingDecision(
     return ruleBasedDecision(state, config);
   }
 
+  // 如果 shouldContinue 未定义，根据 nextAgent 判断：不是 'done' 就继续
+  const shouldContinue = response.shouldContinue !== undefined 
+    ? Boolean(response.shouldContinue) 
+    : nextAgent !== 'done';
+
   return {
     nextAgent: nextAgent as AgentName | 'done',
     reason: (response.reason as string) || 'LLM 决策',
     instructions: (response.instructions as string) || '',
-    shouldContinue: response.shouldContinue as boolean,
+    shouldContinue,
   };
 }
 

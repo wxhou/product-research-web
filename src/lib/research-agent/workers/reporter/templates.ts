@@ -327,13 +327,22 @@ function renderSection(
   let content = section.template;
   const analysis = data.analysis;
 
+  // 计算统计数据
+  const featureCount = analysis.features.length;
+  const competitorCount = analysis.competitors.length;
+  const productCount = competitorCount + 1; // 包括目标产品本身
+
   // 替换简单占位符
   content = content.replace(/{title}/g, data.title);
-  content = content.replace(/{keywords}/g, data.keywords);
+  content = content.replace(/{keywords}/g, data.keywords || '无关键词');
   content = content.replace(/{searchResultCount}/g, String(data.searchResultCount));
   content = content.replace(/{extractionCount}/g, String(data.extractionCount));
   content = content.replace(/{dataSources}/g, data.dataSources);
-  content = content.replace(/{confidenceScore}/g, `${(data.analysis.confidenceScore * 100).toFixed(0)}%`);
+  content = content.replace(/{featureCount}/g, String(featureCount));
+  content = content.replace(/{competitorCount}/g, String(competitorCount));
+  content = content.replace(/{productCount}/g, String(productCount));
+  // 注意：模板中已有 % 后缀，这里不再添加
+  content = content.replace(/{confidenceScore}/g, String((data.analysis.confidenceScore * 100).toFixed(0)));
 
   // 特殊处理表格和图表
   if (section.id === 'features') {
@@ -395,6 +404,10 @@ function replaceMermaidChart(
  * 渲染功能表格
  */
 function renderFeatureTable(features: Array<{ name: string; count: number; description: string }>): string {
+  if (features.length === 0) {
+    return '| 暂无功能数据 | - | - | - |';
+  }
+
   const total = features.reduce((sum, f) => sum + f.count, 0);
 
   return features
@@ -432,28 +445,42 @@ function renderMindmapItems(items: string[]): string {
  * 渲染功能饼图
  */
 function renderFeaturePieChart(features: Array<{ name: string; count: number }>): string {
-  const topFeatures = features.slice(0, 8);
-  return topFeatures.map((f) => `    "${f.name}" : ${f.count}`).join('\n');
+  if (features.length === 0) {
+    return '    "暂无数据" : 1';
+  }
+
+  return features.slice(0, 8).map((f) => {
+    // 清理名称中可能导致 mermaid 语法错误的字符
+    const safeName = f.name.replace(/"/g, "'").replace(/[\n\r]/g, ' ');
+    return `    "${safeName}" : ${f.count}`;
+  }).join('\n');
 }
 
 /**
  * 渲染竞品思维导图
  */
 function renderCompetitorMindmap(competitors: Array<{ name: string; industry: string; features: string[]; description: string; marketPosition: string }>): string {
-  let result = '  root((竞品分析))\n';
+  // 注意：root 节点由 replaceMermaidChart 的 header 参数提供，这里只返回子节点
+  if (competitors.length === 0) {
+    return '    暂无竞品数据';
+  }
+  let result = '';
   for (const c of competitors.slice(0, 5)) {
-    result += `    ${c.name}\n`;
+    // 清理竞品名称，移除可能导致 mermaid 语法错误的字符
+    const safeName = c.name.replace(/[()[\]{}]/g, '').trim();
+    if (!safeName) continue;
+    result += `    ${safeName}\n`;
     if (c.industry) {
-      result += `      - 行业: ${c.industry}\n`;
+      result += `      行业: ${c.industry}\n`;
     }
     if (c.marketPosition) {
-      result += `      - 定位: ${c.marketPosition}\n`;
+      result += `      定位: ${c.marketPosition}\n`;
     }
-    if (c.features.length > 0) {
-      result += `      - 特点: ${c.features.slice(0, 2).join(', ')}\n`;
+    if (c.features && c.features.length > 0) {
+      result += `      特点: ${c.features.slice(0, 2).join(', ')}\n`;
     }
   }
-  return result;
+  return result || '    暂无竞品数据';
 }
 
 /**
