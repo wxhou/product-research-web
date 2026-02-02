@@ -10,10 +10,199 @@
 
 import type { ResearchState, Checkpoint } from '../state';
 import type { BackupManifest, BackupConfig } from '../types';
+import { MarkdownStateManager } from './markdown-state';
 
 // ============================================================
-// CheckpointSaver 接口 (LangGraph 风格)
+// File Checkpoint Saver (基于 MarkdownStateManager)
 // ============================================================
+
+/**
+ * 文件检查点保存器
+ *
+ * 将检查点持久化到文件系统，使用 MarkdownStateManager
+ */
+export class FileCheckpointer implements CheckpointSaver {
+  private stateManager: MarkdownStateManager;
+  private memoryCache: Map<string, Checkpoint> = new Map();
+
+  constructor(stateDir: string = 'task-data') {
+    this.stateManager = new MarkdownStateManager({
+      stateDir,
+      enableCompression: true,
+      maxFileSize: 10 * 1024 * 1024,
+    });
+  }
+
+  /**
+   * 列出所有状态文件
+   */
+  listStates(): string[] {
+    return this.stateManager.listStates();
+  }
+
+  async put(
+    state: ResearchState,
+    config: LangGraphCheckpointConfig
+  ): Promise<Checkpoint> {
+    const checkpointId = config.checkpointId || `checkpoint-${Date.now()}`;
+    const threadKey = config.threadId;
+
+    // 先写入内存缓存
+    const checkpoint: Checkpoint = {
+      config: {
+        configurable: {
+          thread_id: config.threadId,
+          checkpoint_id: checkpointId,
+        },
+      },
+      checkpoint: state,
+      metadata: {
+        source: 'file',
+        created_at: new Date().toISOString(),
+      },
+      parentCheckpointId: this._getLatestCheckpointId(threadKey) || undefined,
+    };
+
+    this.memoryCache.set(checkpointId, checkpoint);
+
+    // 同时写入文件（持久化）
+    const writeSuccess = await this.stateManager.writeState(state, {
+      addTimestamp: true,
+      computeChecksum: true,
+    });
+
+    if (writeSuccess) {
+      console.log(`[FileCheckpointer] Saved checkpoint ${checkpointId} to file for project ${state.projectId}`);
+    } else {
+      console.warn(`[FileCheckpointer] Failed to save checkpoint to file for project ${state.projectId}, memory only`);
+    }
+
+    return checkpoint;
+  }
+
+  async get(config: LangGraphCheckpointConfig): Promise<Checkpoint | null> {
+    const threadKey = config.threadId;
+
+    // 先尝试从文件读取（最新状态）
+    const state = await this.stateManager.readState(threadKey);
+    if (state) {
+      const checkpoint: Checkpoint = {
+        config: {
+          configurable: {
+            thread_id: config.threadId,
+            checkpoint_id: `file-${Date.now()}`,
+          },
+        },
+        checkpoint: state,
+        metadata: {
+          source: 'file',
+          created_at: state.updatedAt,
+        },
+      };
+      return checkpoint;
+    }
+
+    // 回退到内存缓存
+    const latestId = this._getLatestCheckpointId(threadKey);
+    if (latestId) {
+      return this.memoryCache.get(latestId) || null;
+    }
+
+    return null;
+  }
+
+  async getCheckpoint(
+    checkpointId: string,
+    _config: LangGraphCheckpointConfig
+  ): Promise<Checkpoint | null> {
+    return this.memoryCache.get(checkpointId) || null;
+  }
+
+  async *list(config: LangGraphCheckpointConfig): AsyncGenerator<Checkpoint, void> {
+    const threadKey = config.threadId;
+
+    // 从文件恢复
+    const state = await this.stateManager.readState(threadKey);
+    if (state) {
+      const checkpoint: Checkpoint = {
+        config: {
+          configurable: {
+            thread_id: config.threadId,
+            checkpoint_id: 'latest',
+          },
+        },
+        checkpoint: state,
+        metadata: {
+          source: 'file',
+          created_at: state.updatedAt,
+        },
+      };
+      yield checkpoint;
+    }
+
+    // 内存中的检查点
+    for (const checkpoint of this.memoryCache.values()) {
+      if (checkpoint.config.configurable.thread_id === threadKey) {
+        yield checkpoint;
+      }
+    }
+  }
+
+  async delete(
+    checkpointId: string,
+    _config: LangGraphCheckpointConfig
+  ): Promise<boolean> {
+    const checkpoint = this.memoryCache.get(checkpointId);
+    if (!checkpoint) {
+      return false;
+    }
+
+    this.memoryCache.delete(checkpointId);
+
+    // 删除文件
+    await this.stateManager.deleteState(checkpoint.checkpoint.projectId);
+
+    console.log(`[FileCheckpointer] Deleted checkpoint ${checkpointId}`);
+    return true;
+  }
+
+  private _getLatestCheckpointId(threadKey: string): string | null {
+    // 找到该线程最新检查点
+    let latestId: string | null = null;
+    let latestTime = 0;
+
+    for (const [id, checkpoint] of this.memoryCache) {
+      if (checkpoint.config.configurable.thread_id === threadKey) {
+        const time = new Date(checkpoint.metadata.created_at).getTime();
+        if (time > latestTime) {
+          latestTime = time;
+          latestId = id;
+        }
+      }
+    }
+
+    return latestId;
+  }
+}
+
+/**
+ * 创建文件检查点保存器
+ */
+export function createFileCheckpointer(stateDir: string = 'task-data'): FileCheckpointer {
+  return new FileCheckpointer(stateDir);
+}
+
+/**
+ * 删除状态文件
+ */
+export async function deleteStateFile(projectId: string, stateDir: string = 'task-data'): Promise<boolean> {
+  const stateManager = new MarkdownStateManager({
+    stateDir,
+    enableCompression: true,
+    maxFileSize: 10 * 1024 * 1024,
+  });
+  return stateManager.deleteState(projectId);
+}
 
 /**
  * 检查点配置（LangGraph 风格）

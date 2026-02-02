@@ -15,7 +15,7 @@ import {
   createResearchGraph,
   createSimpleResearchGraph,
 } from './graph/builder';
-import { createMemoryCheckpointer } from './graph/checkpoint';
+import { createFileCheckpointer, deleteStateFile } from './graph/checkpoint';
 import { createSupervisorAgent } from './supervisor';
 
 // ============================================================
@@ -88,7 +88,7 @@ export interface ResearchTaskExecutor {
  * 使用 LangGraph 风格的 StateGraph 进行编排
  */
 export function createResearchTaskExecutor(config: ResearchTaskConfig): ResearchTaskExecutor {
-  const checkpointer = createMemoryCheckpointer();
+  const checkpointer = createFileCheckpointer();
   const supervisor = createSupervisorAgent({
     maxRetries: 3,
     qualityThresholds: {
@@ -123,13 +123,41 @@ export function createResearchTaskExecutor(config: ResearchTaskConfig): Research
 
     async start(): Promise<ResearchState> {
       console.log(`[ResearchService] Starting task for project ${config.projectId}`);
-      
+
       // 检查是否已有状态（断点续传）
       const checkpoint = await checkpointer.get({
         threadId: config.projectId,
       });
 
       if (checkpoint) {
+        const savedState = checkpoint.checkpoint;
+
+        // 如果任务已失败，允许重新执行（重试）
+        if (savedState.status === 'failed') {
+          console.log(`[ResearchService] Previous attempt failed (${savedState.progressMessage}), restarting...`);
+          // 重置状态为 pending，允许重新执行
+          savedState.status = 'pending';
+          savedState.currentStep = 'supervisor';
+          savedState.progress = 0;
+          savedState.progressMessage = '正在重新执行研究任务...';
+          savedState.updatedAt = new Date().toISOString();
+          savedState.retryCount = (savedState.retryCount || 0) + 1;
+
+          // 直接执行图，使用重置后的状态
+          const result = await this.compiledGraph.invoke(savedState, {
+            threadId: config.projectId,
+          });
+
+          console.log(`[ResearchService] Graph execution completed: status=${result.finalState.status}, iterations=${result.iterations}`);
+          return result.finalState;
+        }
+
+        // 如果已完成或进行中，恢复执行
+        if (savedState.status === 'completed') {
+          console.log(`[ResearchService] Task already completed`);
+          return savedState;
+        }
+
         console.log(`[ResearchService] Resuming task for project ${config.projectId}`);
         return this.executeStep();
       }
@@ -513,7 +541,7 @@ function createSupervisorNode(
       };
     }
 
-    // 检查是否在同一个状态下循环（需要递增重试次数）
+    // 根据决策更新状态
     const statusMap: Record<string, ResearchState['status']> = {
       planner: 'planning',
       searcher: 'searching',
@@ -522,14 +550,10 @@ function createSupervisorNode(
       reporter: 'reporting',
     };
 
-    const nextStatus = statusMap[decision.nextAgent] || 'planning';
-    const isLooping = state.status === nextStatus;
-
     return {
       currentStep: decision.nextAgent as AgentName,
-      status: nextStatus,
+      status: statusMap[decision.nextAgent] || 'planning',
       progressMessage: decision.reason,
-      retryCount: isLooping ? (state.retryCount || 0) + 1 : state.retryCount,
       updatedAt: new Date().toISOString(),
     };
   };
@@ -543,7 +567,7 @@ function createSupervisorNode(
  * 获取任务状态
  */
 export async function getResearchTaskStatus(projectId: string): Promise<TaskStatusResponse | null> {
-  const checkpointer = createMemoryCheckpointer();
+  const checkpointer = createFileCheckpointer();
   const checkpoint = await checkpointer.get({
     threadId: projectId,
   });
@@ -571,16 +595,16 @@ export async function getResearchTaskStatus(projectId: string): Promise<TaskStat
  * 列出所有研究任务
  */
 export function listResearchTasks(): string[] {
-  // 由于使用内存存储，这里无法列出所有任务
-  console.warn('[ResearchService] listResearchTasks requires persistent storage');
-  return [];
+  // 使用 FileCheckpointer 列出状态目录中的项目
+  const checkpointer = createFileCheckpointer();
+  return checkpointer.listStates();
 }
 
 /**
  * 删除研究任务
  */
 export async function deleteResearchTask(projectId: string): Promise<boolean> {
-  const checkpointer = createMemoryCheckpointer();
+  const checkpointer = createFileCheckpointer();
   const checkpoint = await checkpointer.get({
     threadId: projectId,
   });
@@ -589,26 +613,16 @@ export async function deleteResearchTask(projectId: string): Promise<boolean> {
     return false;
   }
 
-  // 删除所有检查点
-  for await (const cp of checkpointer.list({
-    threadId: projectId,
-  })) {
-    const checkpointId = cp.config.configurable.checkpoint_id;
-    if (checkpointId) {
-      await checkpointer.delete(checkpointId, {
-        threadId: projectId,
-      });
-    }
-  }
-
-  return true;
+  // 删除文件
+  const deleted = await deleteStateFile(projectId);
+  return deleted;
 }
 
 /**
  * 检查任务是否存在
  */
 export async function researchTaskExists(projectId: string): Promise<boolean> {
-  const checkpointer = createMemoryCheckpointer();
+  const checkpointer = createFileCheckpointer();
   const checkpoint = await checkpointer.get({
     threadId: projectId,
   });

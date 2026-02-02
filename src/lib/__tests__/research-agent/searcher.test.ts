@@ -69,10 +69,9 @@ describe('Searcher Worker', () => {
         'rss-theverge',
         'rss-wired',
         'rss-producthunt',
-        'devto',
         'reddit',
         'v2ex',
-        'mcp-fetch',
+        'crawl4ai',
       ];
 
       validSources.forEach(source => {

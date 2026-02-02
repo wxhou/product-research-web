@@ -109,11 +109,16 @@ async function executeSupervision(
       currentItem: currentStep,
     });
 
-    // 获取 LLM 配置
+    // 获取 LLM 配置（对于本地模型如 Ollama，apiKey 可以为 null）
     const llmConfig = getLLMConfig();
+    const hasLLMConfig = !!(llmConfig.baseUrl || llmConfig.apiKey || llmConfig.modelName);
+    const isLocalModel = llmConfig.provider === 'ollama' ||
+                         llmConfig.baseUrl?.includes('localhost') ||
+                         llmConfig.baseUrl?.includes('127.0.0.1');
+    const needsApiKey = !isLocalModel;
     const hasApiKey = !!llmConfig.apiKey;
 
-    if (!hasApiKey) {
+    if (!hasLLMConfig || (needsApiKey && !hasApiKey)) {
       return {
         success: false,
         error: 'LLM 不可用，无法进行路由决策',
@@ -152,8 +157,7 @@ async function makeRoutingDecision(
   state: ResearchState,
   config: SupervisorConfig
 ): Promise<SupervisorDecision> {
-  const { status, searchResults, extractedContent, analysis, projectPath, rawFileCount, retryCount = 0 } = state;
-  const maxRetries = state.maxRetries || 3;
+  const { status, searchResults, extractedContent, analysis, projectPath, rawFileCount } = state;
 
   // 构建详细的状态描述
   const statusDescription = getStatusDescription(status, searchResults.length, extractedContent.length, rawFileCount);
@@ -172,10 +176,9 @@ ${statusDescription}
 - 分析置信度：${analysis?.confidenceScore?.toFixed(2) || 'N/A'}
 - 识别功能数：${analysis?.features?.length || 0}
 - 识别竞品数：${analysis?.competitors?.length || 0}
-- 已重试次数：${retryCount}/${maxRetries}
 - 质量阈值要求：搜索结果≥${config.qualityThresholds.minSearchResults}, 提取≥${config.qualityThresholds.minExtractions}
 
-请根据当前状态决定下一步操作，确保研究流程完整进行。如果重试次数已达上限，强制完成任务。`;
+请根据当前状态决定下一步操作，确保研究流程完整进行。`;
 
   // 调用 LLM
   const responseText = await generateText(prompt);
@@ -186,7 +189,7 @@ ${statusDescription}
     response = JSON.parse(responseText);
   } catch {
     // 解析失败时使用默认决策
-    return getDefaultDecision(status, searchResults.length, extractedContent.length, !!analysis, retryCount, maxRetries);
+    return getDefaultDecision(status, searchResults.length, extractedContent.length, !!analysis);
   }
 
   // 验证决策
@@ -194,7 +197,7 @@ ${statusDescription}
   const validAgents = ['planner', 'searcher', 'extractor', 'analyzer', 'reporter', 'done'];
 
   if (!validAgents.includes(nextAgent)) {
-    return getDefaultDecision(status, searchResults.length, extractedContent.length, !!analysis, retryCount, maxRetries);
+    return getDefaultDecision(status, searchResults.length, extractedContent.length, !!analysis);
   }
 
   return {
@@ -254,36 +257,8 @@ function getDefaultDecision(
   status: string,
   searchCount: number,
   extractionCount: number,
-  hasAnalysis: boolean,
-  retryCount: number = 0,
-  maxRetries: number = 3
+  hasAnalysis: boolean
 ): SupervisorDecision {
-  // 如果达到最大重试次数，强制完成任务
-  if (retryCount >= maxRetries) {
-    if (status === 'searching' && searchCount > 0) {
-      return {
-        nextAgent: 'extractor',
-        reason: `重试次数达上限 (${retryCount})，已有 ${searchCount} 条搜索结果，继续提取`,
-        instructions: '继续执行，即使数据不理想',
-        shouldContinue: true,
-      };
-    }
-    if (status === 'analyzing' && hasAnalysis) {
-      return {
-        nextAgent: 'reporter',
-        reason: `重试次数达上限 (${retryCount})，分析已完成，生成报告`,
-        instructions: '生成报告，即使分析可能不完整',
-        shouldContinue: true,
-      };
-    }
-    return {
-      nextAgent: 'done',
-      reason: `重试次数达上限 (${retryCount})，任务强制完成`,
-      instructions: '任务完成',
-      shouldContinue: false,
-    };
-  }
-
   // 基于状态机的确定性决策
   switch (status) {
     case 'pending':
@@ -313,7 +288,7 @@ function getDefaultDecision(
       }
       return {
         nextAgent: 'searcher',
-        reason: `搜索结果不足 (${searchCount}/15)，继续搜索 (${retryCount + 1}/${maxRetries})`,
+        reason: `搜索结果不足 (${searchCount}/15)，继续搜索`,
         instructions: '补充更多搜索查询',
         shouldContinue: true,
       };
@@ -345,7 +320,7 @@ function getDefaultDecision(
       }
       return {
         nextAgent: 'analyzer',
-        reason: `分析不完整，重新分析 (${retryCount + 1}/${maxRetries})`,
+        reason: '分析不完整，重新分析',
         instructions: '补充分析或重新分析',
         shouldContinue: true,
       };
@@ -374,7 +349,7 @@ function getDefaultDecision(
 function assessQuality(
   state: ResearchState,
   config: SupervisorConfig
-): SupervisorDecision & { dataGaps: string[]; score: number; issues: string[]; isComplete: boolean } {
+): SupervisorDecision & { dataGaps: string[] } {
   const { searchResults, extractedContent, analysis } = state;
   const issues: string[] = [];
   let score = 100;
@@ -431,9 +406,11 @@ function assessQuality(
     reason: isComplete ? '质量评估通过' : '需要更多分析',
     instructions: isComplete ? '生成报告' : '补充分析',
     shouldContinue: true,
-    isComplete,
-    score: Math.max(0, score),
-    issues,
+    qualityAssessment: {
+      isComplete,
+      score: Math.max(0, score),
+      issues,
+    },
     dataGaps,
   };
 }

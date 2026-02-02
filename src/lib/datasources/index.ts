@@ -8,13 +8,6 @@
  * 4. GitHub API - 搜索开源项目
  */
 
-export interface McpFetchResult {
-  original: string;
-  enriched: string;
-  timestamp: string;
-  contentLength: number;
-}
-
 export interface SearchResult {
   // 基础字段
   title: string;
@@ -31,8 +24,6 @@ export interface SearchResult {
   crawledAt?: string;
   contentHash?: string;
   content?: string;
-  // 爬虫扩展字段
-  mcpFetchContent?: McpFetchResult;
 }
 
 export interface SearchOptions {
@@ -54,11 +45,11 @@ export type DataSourceType =
   // GitHub
   | 'github'
   // 国际技术社区
-  | 'devto' | 'reddit' | 'hackernews-api'
+  | 'reddit' | 'hackernews-api'
   // 国内技术社区
   | 'v2ex'
   // 全文爬取
-  | 'mcp-fetch';
+  | 'crawl4ai';
 
 // 获取环境变量
 function getEnv(key: string): string | undefined {
@@ -193,16 +184,56 @@ class RSSService implements SearchService {
 
 // ==================== DuckDuckGo 搜索（免费）====================
 
+/**
+ * 带重试的 fetch 函数
+ */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit,
+  maxRetries = 3,
+  baseDelay = 1000
+): Promise<Response> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+      const res = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      return res;
+    } catch (error) {
+      lastError = error as Error;
+      if (attempt < maxRetries - 1) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        console.warn(`[DuckDuckGo] Fetch attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 class DuckDuckGoService implements SearchService {
   name = 'DuckDuckGo';
   type = 'duckduckgo' as DataSourceType;
 
   async search(query: string, limit = 10): Promise<SearchResult[]> {
+    const results: SearchResult[] = [];
+
     try {
-      const res = await fetch(
+      // API 搜索
+      const res = await fetchWithRetry(
         `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`,
-        { signal: AbortSignal.timeout(15000) }
+        {}
       );
+
       if (!res.ok) throw new Error(`DuckDuckGo API error: ${res.status}`);
 
       const text = await res.text();
@@ -217,8 +248,6 @@ class DuckDuckGoService implements SearchService {
         console.error('DuckDuckGo JSON parse error:', parseError);
         return [];
       }
-
-      const results: SearchResult[] = [];
 
       // Instant Answer
       if (data.AbstractText) {
@@ -241,44 +270,42 @@ class DuckDuckGoService implements SearchService {
           });
         }
       }
+    } catch (error) {
+      console.warn('DuckDuckGo API search failed, falling back to HTML search:', error);
+    }
 
-      // Also try to get some web results
-      if (results.length < limit) {
-        // DuckDuckGo HTML search for more results
-        try {
-          const htmlRes = await fetch(
-            `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=us-en`,
-            { signal: AbortSignal.timeout(15000) }
-          );
-          if (htmlRes.ok) {
-            const html = await htmlRes.text();
-            if (html && html.trim()) {
-              const linkRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/g;
-              let match: RegExpExecArray | null = null;
-              let count = 0;
-              while ((match = linkRegex.exec(html)) !== null && results.length < limit && count < 5) {
-                if (!results.find(r => r.url === match![1])) {
-                  results.push({
-                    title: this.stripHtml(match[2]),
-                    url: match[1],
-                    content: `相关搜索结果: ${match[2]}`,
-                    source: 'duckduckgo',
-                  });
-                  count++;
-                }
+    // HTML 搜索作为备选
+    if (results.length < limit) {
+      try {
+        const htmlRes = await fetchWithRetry(
+          `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=us-en`,
+          {}
+        );
+        if (htmlRes.ok) {
+          const html = await htmlRes.text();
+          if (html && html.trim()) {
+            const linkRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/g;
+            let match: RegExpExecArray | null = null;
+            let count = 0;
+            while ((match = linkRegex.exec(html)) !== null && results.length < limit && count < 5) {
+              if (!results.find(r => r.url === match![1])) {
+                results.push({
+                  title: this.stripHtml(match[2]),
+                  url: match[1],
+                  content: `相关搜索结果: ${match[2]}`,
+                  source: 'duckduckgo',
+                });
+                count++;
               }
             }
           }
-        } catch (htmlError) {
-          // Silently ignore HTML fetch errors
         }
+      } catch (htmlError) {
+        console.warn('DuckDuckGo HTML search failed:', htmlError);
       }
-
-      return results.slice(0, limit);
-    } catch (error) {
-      console.error('DuckDuckGo Search error:', error);
-      return [];
     }
+
+    return results.slice(0, limit);
   }
 
   private stripHtml(html: string): string {
@@ -495,56 +522,6 @@ class GitHubService implements SearchService {
   }
 }
 
-// ==================== Dev.to 技术社区====================
-
-class DevToService implements SearchService {
-  name = 'Dev.to';
-  type = 'devto' as DataSourceType;
-
-  async search(query: string, limit = 10): Promise<SearchResult[]> {
-    const maxRetries = 3;
-    const baseDelay = 1000;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        const res = await fetch(
-          `https://dev.to/api/articles?tag=${encodeURIComponent(query)}&per_page=${limit}`,
-          { signal: AbortSignal.timeout(15000) }
-        );
-
-        if (res.status === 429) {
-          const delay = baseDelay * Math.pow(2, attempt);
-          console.log(`Dev.to rate limited, waiting ${delay}ms before retry...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-
-        if (!res.ok) {
-          console.log(`Dev.to API error: ${res.status}`);
-          return [];
-        }
-
-        const data = await res.json();
-        return (data || []).slice(0, limit).map((item: any) => ({
-          title: item.title || query,
-          url: item.url || item.canonical_url || '',
-          content: item.description || item.title || '',
-          source: 'devto',
-          publishedAt: item.published_at,
-        }));
-      } catch (error) {
-        if (attempt === maxRetries - 1) {
-          console.error('Dev.to Search error:', error);
-          return [];
-        }
-        const delay = baseDelay * Math.pow(2, attempt);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-    return [];
-  }
-}
-
 // ==================== Reddit 社区讨论====================
 
 class RedditService implements SearchService {
@@ -754,131 +731,158 @@ class CnBlogsRSSService implements SearchService {
   }
 }
 
-// ==================== MCP Fetch 全文爬取服务（MCP 协议）====================
+// ==================== Crawl4AI 全文爬取服务 ====================
 //
-// zcaceres/fetch-mcp 是一个基于 MCP 协议的网页内容提取工具
-// GitHub: https://github.com/zcaceres/fetch-mcp
+// Crawl4AI 是一个开源的网页爬取工具，支持 Markdown 格式输出
+// GitHub: https://github.com/unclecode/crawl4ai
 // 特性：
-// - 使用 MCP 协议与 fetch-mcp-server 通信
 // - 返回 Markdown 格式内容
-// - 支持 fetch_markdown/fetch_html/fetch_json/fetch_txt 工具
-// - 无需 Docker，通过 npx 启动子进程
+// - 支持 JavaScript 渲染
+// - 可配置超时和内容长度
+// - 无需 API Key
 //
 // 使用方式：
-// 1. 在设置页面启用 MCP Fetch（推荐）或设置环境变量 ENABLE_MCP_FETCH=true
-// 2. 启动命令: npx mcp-fetch-server
-// 3. 自动通过 stdio 与 MCP Server 通信
+// 1. 通过 Docker 启动服务：docker run -p 8000:8000 unclecode/crawl4ai
+// 2. 或使用官方 API：https://crawl4ai.com
+// 3. 设置环境变量 CRAWL4AI_API_URL
 
-interface McpFetchConfig {
-  enabled: boolean;
+interface Crawl4AIConfig {
+  baseUrl: string;
+  timeout: number;
   maxLength: number;
 }
 
-class McpFetchService implements SearchService {
-  name = 'MCP Fetch';
-  type = 'mcp-fetch' as DataSourceType;
+interface Crawl4AIResult {
+  url: string;
+  success: boolean;
+  markdown?: string;
+  error?: string;
+  metadata?: {
+    title?: string;
+    description?: string;
+    keywords?: string[];
+  };
+}
 
-  private enabled!: boolean;
-  private maxLength!: number;
+class Crawl4AIService {
+  private config: Crawl4AIConfig;
+  private initialized = false;
 
   constructor() {
-    this.loadConfig();
+    this.config = {
+      baseUrl: process.env.CRAWL4AI_API_URL || 'http://192.168.0.124:11235',
+      timeout: parseInt(process.env.CRAWL4AI_TIMEOUT || '60000', 10),
+      maxLength: parseInt(process.env.CRAWL4AI_MAX_LENGTH || '100000', 10),
+    };
 
-    if (this.enabled) {
-      console.log(`[MCP Fetch] Enabled, maxLength: ${this.maxLength}`);
-    } else {
-      console.log('[MCP Fetch] Disabled');
-    }
+    console.log(`[Crawl4AI] Initialized with baseUrl: ${this.config.baseUrl}`);
   }
 
   /**
-   * 从数据库加载配置，优先数据库配置，回退到环境变量
-   */
-  private loadConfig(): void {
-    try {
-      const { settingsDb } = require('@/lib/db');
-      const result = settingsDb.get.get({ key: 'mcp_fetch_config' }) as { value: string } | undefined;
-
-      if (result?.value) {
-        const config = JSON.parse(result.value) as McpFetchConfig;
-        this.enabled = config.enabled;
-        this.maxLength = config.maxLength || 50000;
-      } else {
-        // 回退到环境变量
-        this.enabled = process.env.ENABLE_MCP_FETCH === 'true';
-        this.maxLength = parseInt(process.env.MCP_FETCH_MAX_LENGTH || '50000', 10);
-      }
-    } catch (error) {
-      // 回退到环境变量
-      this.enabled = process.env.ENABLE_MCP_FETCH === 'true';
-      this.maxLength = parseInt(process.env.MCP_FETCH_MAX_LENGTH || '50000', 10);
-    }
-  }
-
-  /**
-   * 刷新配置（从数据库重新加载）
+   * 刷新配置
    */
   refreshConfig(): void {
-    this.loadConfig();
-    console.log(`[MCP Fetch] Config refreshed: enabled=${this.enabled}, maxLength=${this.maxLength}`);
-  }
-
-  async search(_query: string, _limit = 10): Promise<SearchResult[]> {
-    // MCP Fetch 不直接支持搜索，它用于爬取给定 URL 的内容
-    console.log('[MCP Fetch] Direct search not supported, use crawl() method instead');
-    return [];
+    this.config = {
+      baseUrl: process.env.CRAWL4AI_API_URL || 'http://192.168.0.124:11235',
+      timeout: parseInt(process.env.CRAWL4AI_TIMEOUT || '60000', 10),
+      maxLength: parseInt(process.env.CRAWL4AI_MAX_LENGTH || '100000', 10),
+    };
+    console.log(`[Crawl4AI] Config refreshed: ${this.config.baseUrl}`);
   }
 
   /**
-   * 使用 fetch_markdown 工具获取网页 Markdown 内容
+   * 检查服务是否可用
+   */
+  async isAvailable(): Promise<boolean> {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+      const res = await fetch(`${this.config.baseUrl}/health`, {
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 爬取单个 URL
    */
   async crawl(
     url: string,
-    originalContent?: string,
+    _originalContent?: string,
     options?: { timeout?: number; maxLength?: number }
-  ): Promise<SearchResult | null> {
-    // 刷新配置，确保使用最新的设置
-    this.refreshConfig();
-
-    if (!this.enabled) {
-      return null;
-    }
-
-    // 动态导入 MCP 模块
-    let mcpFetchService: any = null;
-    try {
-      const mcp = await import('@/lib/mcp');
-      mcpFetchService = mcp.getFetchService();
-    } catch (error) {
-      console.error('[MCP Fetch] Failed to import MCP module:', error);
-      return null;
-    }
-
-    if (!mcpFetchService || !(await mcpFetchService.isAvailable())) {
-      return null;
-    }
+  ): Promise<Crawl4AIResult | null> {
+    const timeout = options?.timeout || this.config.timeout;
+    const maxLength = options?.maxLength || this.config.maxLength;
 
     try {
-      const maxLength = options?.maxLength || this.maxLength;
-      const result = await mcpFetchService.crawl(url, originalContent, {
-        timeout: options?.timeout,
-        maxLength,
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      // 使用简单的请求格式，确保兼容性
+      // 高级提取选项（extraction_strategy、css_selector等）可能不被所有版本的Crawl4AI支持
+      // 内容质量通过 extractor 中的 cleanContent 函数后处理来保证
+      const requestBody = {
+        urls: [url],
+        priority: 10,
+      };
+
+      const res = await fetch(`${this.config.baseUrl}/crawl`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
       });
 
-      if (!result) {
-        return null;
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const error = await res.text();
+        console.error(`[Crawl4AI] API error: ${res.status} - ${error}`);
+        return { url, success: false, error: `API error: ${res.status}` };
       }
 
+      const data = await res.json();
+
+      // 处理响应格式
+      // 可能是 { results: [...] } 或 { success: true, results: [...] }
+      const results = data.results || [];
+      const result = results[0] || data;
+
+      // 获取 markdown 内容
+      let markdown: string | undefined;
+      if (typeof result.markdown === 'string') {
+        markdown = result.markdown;
+      } else if (result.markdown && typeof result.markdown === 'object') {
+        // markdown 可能是对象，包含 fit_markdown 或 raw_markdown
+        markdown = result.markdown.fit_markdown || result.markdown.raw_markdown || result.markdown;
+      }
+
+      // 检查是否成功：优先使用 success 字段，status_code 200 或 201 都算成功
+      const success = result.success !== false && [200, 201].includes(result.status_code);
+
       return {
-        title: result.title || url,
-        url,
-        content: result.content,
-        source: 'mcp-fetch',
-        mcpFetchContent: result.mcpFetchContent,
+        url: result.url || url,
+        success,
+        markdown,
+        error: success ? undefined : result.error_message || 'Crawl failed',
+        metadata: {
+          title: result.metadata?.title || result.title,
+          description: result.metadata?.description || result.description,
+          keywords: result.metadata?.keywords || result.keywords,
+        },
       };
     } catch (error) {
-      console.error(`[MCP Fetch] Failed to fetch ${url}:`, error instanceof Error ? error.message : error);
-      return null;
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[Crawl4AI] Failed to crawl ${url}: ${errorMessage}`);
+      return { url, success: false, error: errorMessage };
     }
   }
 
@@ -887,59 +891,45 @@ class McpFetchService implements SearchService {
    */
   async crawlMultiple(
     urls: string[],
-    originalContents?: Map<string, string>,
+    _originalContents?: Map<string, string>,
     options?: { timeout?: number; maxLength?: number }
-  ): Promise<SearchResult[]> {
+  ): Promise<Crawl4AIResult[]> {
     if (urls.length === 0) return [];
 
-    // 刷新配置，确保使用最新的设置
-    this.refreshConfig();
+    const timeout = options?.timeout || this.config.timeout;
+    const results: Crawl4AIResult[] = [];
 
-    if (!this.enabled) return [];
+    // 并行爬取（限制并发数）
+    const concurrency = 4;
+    for (let i = 0; i < urls.length; i += concurrency) {
+      const batch = urls.slice(i, i + concurrency);
+      const batchResults = await Promise.all(
+        batch.map(url => this.crawl(url, undefined, options))
+      );
 
-    // 动态导入 MCP 模块
-    let mcpFetchService: any = null;
-    try {
-      const mcp = await import('@/lib/mcp');
-      mcpFetchService = mcp.getFetchService();
-    } catch (error) {
-      console.error('[MCP Fetch] Failed to import MCP module:', error);
-      return [];
+      for (const result of batchResults) {
+        if (result) {
+          results.push(result);
+        }
+      }
+
+      // 避免请求过于频繁
+      if (i + concurrency < urls.length) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
     }
 
-    if (!mcpFetchService || !(await mcpFetchService.isAvailable())) {
-      return [];
-    }
-
-    try {
-      const results = await mcpFetchService.crawlMultiple(urls, originalContents, options);
-      return results.map((result: { title?: string; url: string; content: string; mcpFetchContent?: McpFetchResult }) => ({
-        title: result.title || result.url,
-        url: result.url,
-        content: result.content,
-        source: 'mcp-fetch',
-        mcpFetchContent: result.mcpFetchContent,
-      }));
-    } catch (error) {
-      console.error('[MCP Fetch] Batch crawl error:', error instanceof Error ? error.message : error);
-      return [];
-    }
+    return results;
   }
+}
 
-  async isAvailable(): Promise<boolean> {
-    // 刷新配置，确保使用最新的设置
-    this.refreshConfig();
-
-    if (!this.enabled) return false;
-
-    try {
-      const mcp = await import('@/lib/mcp');
-      const mcpFetchService = mcp.getFetchService();
-      return mcpFetchService ? await mcpFetchService.isAvailable() : false;
-    } catch {
-      return false;
-    }
+// 单例
+let crawl4aiService: Crawl4AIService | null = null;
+export function getCrawl4AIService(): Crawl4AIService {
+  if (!crawl4aiService) {
+    crawl4aiService = new Crawl4AIService();
   }
+  return crawl4aiService;
 }
 
 // ==================== 服务管理器 ====================
@@ -957,7 +947,7 @@ export class DataSourceManager {
     'rss-hackernews', 'rss-techcrunch', 'rss-theverge', 'rss-wired', 'rss-producthunt',
     'rss-googlenews', 'rss-mittechreview',
     'rss-cnblogs', 'rss-juejin',
-    'duckduckgo', 'devto', 'reddit', 'hackernews-api', 'v2ex',
+    'duckduckgo', 'reddit', 'hackernews-api', 'v2ex',
   ]);
 
   constructor() {
@@ -979,13 +969,9 @@ export class DataSourceManager {
     this.services.set('newsapi', new NewsAPIService());
     this.services.set('gnews', new GNewsService());
     this.services.set('github', new GitHubService());
-    this.services.set('devto', new DevToService());
     this.services.set('reddit', new RedditService());
     this.services.set('hackernews-api', new HackerNewsAPIService());
     this.services.set('v2ex', new V2EXService());
-
-    // 注册 MCP Fetch 服务
-    this.services.set('mcp-fetch', new McpFetchService());
 
     this.loadEnabledSources();
   }
@@ -1018,15 +1004,6 @@ export class DataSourceManager {
     return Array.from(this.enabledSources);
   }
 
-  // 获取 MCP Fetch 服务实例（用于全文爬取）
-  getMcpFetchService(): McpFetchService | null {
-    const service = this.services.get('mcp-fetch');
-    if (service instanceof McpFetchService) {
-      return service;
-    }
-    return null;
-  }
-
   getAllSources(): Array<{ type: DataSourceType; name: string; enabled: boolean; description: string; free: boolean }> {
     return [
       // RSS 订阅（全部免费）
@@ -1050,13 +1027,12 @@ export class DataSourceManager {
       // GitHub
       { type: 'github', name: 'GitHub', enabled: this.isEnabled('github'), description: '开源项目搜索', free: true },
       // 国际技术社区
-      { type: 'devto', name: 'Dev.to', enabled: this.isEnabled('devto'), description: '技术文章社区', free: true },
       { type: 'reddit', name: 'Reddit', enabled: this.isEnabled('reddit'), description: '技术社区讨论', free: true },
       { type: 'hackernews-api', name: 'Hacker News API', enabled: this.isEnabled('hackernews-api'), description: '官方 API 搜索', free: true },
       // 国内技术社区
       { type: 'v2ex', name: 'V2EX', enabled: this.isEnabled('v2ex'), description: '国内程序员社区', free: true },
       // 全文爬取
-      { type: 'mcp-fetch', name: 'MCP Fetch', enabled: this.isEnabled('mcp-fetch'), description: 'MCP 协议网页内容提取（需启用 ENABLE_MCP_FETCH）', free: true },
+      { type: 'crawl4ai', name: 'Crawl4AI', enabled: this.isEnabled('crawl4ai'), description: '网页全文爬取（需要启动 Crawl4AI 服务）', free: true },
     ];
   }
 
@@ -1112,51 +1088,6 @@ export async function search(query: string, sources?: DataSourceType[], limit = 
     return results.slice(0, limit);
   }
   return mgr.searchAll(query, limit);
-}
-
-// 获取 MCP Fetch 服务实例（用于全文爬取）
-export function getMcpFetchService(): McpFetchService | null {
-  try {
-    const mgr = getDataSourceManager();
-    return mgr.getMcpFetchService();
-  } catch {
-    return null;
-  }
-}
-
-// 使用 MCP Fetch 爬取 URL 的完整内容
-export async function mcpFetchUrl(
-  url: string,
-  originalContent?: string,
-  timeout = 30000
-): Promise<SearchResult | null> {
-  const service = getMcpFetchService();
-  if (!service) {
-    console.warn('MCP Fetch service not available');
-    return null;
-  }
-  return service.crawl(url, originalContent, { timeout });
-}
-
-// 使用 MCP Fetch 批量爬取多个 URL
-export async function mcpFetchUrls(
-  urls: string[],
-  originalContents?: Map<string, string>,
-  timeout = 30000
-): Promise<SearchResult[]> {
-  const service = getMcpFetchService();
-  if (!service) {
-    console.warn('MCP Fetch service not available');
-    return [];
-  }
-  return service.crawlMultiple(urls, originalContents, { timeout });
-}
-
-// 检查 MCP Fetch 服务是否可用
-export async function isMcpFetchAvailable(): Promise<boolean> {
-  const service = getMcpFetchService();
-  if (!service) return false;
-  return service.isAvailable();
 }
 
 export type { SearchService };

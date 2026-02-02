@@ -164,10 +164,9 @@ describe('Planner Worker', () => {
         'rss-hackernews',
         'rss-techcrunch',
         'duckduckgo',
-        'devto',
         'reddit',
         'v2ex',
-        'mcp-fetch',
+        'crawl4ai',
       ];
 
       sources.forEach(source => {

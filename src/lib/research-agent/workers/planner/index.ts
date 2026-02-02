@@ -21,6 +21,7 @@ import {
 } from '../../prompts/planner';
 import { generateText, getLLMConfig } from '../../../llm';
 import { updateProgress } from '../../progress/tracker';
+import { jsonrepair } from 'jsonrepair';
 
 /**
  * Planner Agent 配置
@@ -35,7 +36,7 @@ export interface PlannerConfig {
 /** 默认配置 */
 const DEFAULT_CONFIG: PlannerConfig = {
   useLLM: true,
-  defaultSources: ['duckduckgo', 'rss-hackernews', 'devto'],
+  defaultSources: ['duckduckgo', 'rss-hackernews', 'rss-techcrunch'],
 };
 
 /**
@@ -78,11 +79,16 @@ async function planResearch(
   });
 
   try {
-    // 判断是否使用 LLM
+    // 判断是否使用 LLM（对于本地模型如 Ollama，apiKey 可以为 null）
     const llmConfig = getLLMConfig();
+    const hasLLMConfig = !!(llmConfig.baseUrl || llmConfig.apiKey || llmConfig.modelName);
+    const isLocalModel = llmConfig.provider === 'ollama' ||
+                         llmConfig.baseUrl?.includes('localhost') ||
+                         llmConfig.baseUrl?.includes('127.0.0.1');
+    const needsApiKey = !isLocalModel;
     const hasApiKey = !!llmConfig.apiKey;
 
-    if (!config.useLLM || !hasApiKey) {
+    if (!config.useLLM || !hasLLMConfig || (needsApiKey && !hasApiKey)) {
       // 使用默认配置
       return useDefaultPlan(title, description, keywords, config.defaultSources);
     }
@@ -140,24 +146,18 @@ async function generateSearchPlan(
   // 调用 LLM 生成 JSON 响应
   const responseText = await generateText(enhancedPrompt);
 
-  // 解析 JSON 响应
+  // 使用 jsonrepair 解析 JSON（支持 LLM 返回的各种格式）
   let response: Record<string, unknown>;
   try {
-    response = JSON.parse(responseText);
-  } catch {
-    // 尝试提取 JSON 代码块
-    const jsonMatch = responseText.match(/```json\n([\s\S]*?)\n```/);
-    if (jsonMatch) {
-      response = JSON.parse(jsonMatch[1]);
-    } else {
-      // 尝试提取 {...} 格式的内容
-      const braceMatch = responseText.match(/\{[\s\S]*\}/);
-      if (braceMatch) {
-        response = JSON.parse(braceMatch[0]);
-      } else {
-        throw new Error('无法解析 LLM 响应');
-      }
-    }
+    // 尝试提取 JSON 内容（支持 markdown 代码块）
+    const jsonContent = responseText
+      .match(/```json\s*([\s\S]*?)\s*```/)?.[1]
+      || responseText.match(/\{[\s\S]*\}/)?.[0]
+      || responseText;
+
+    response = JSON.parse(jsonrepair(jsonContent));
+  } catch (parseError) {
+    throw new Error(`无法解析 LLM 响应为 JSON: ${(parseError as Error).message}`);
   }
 
   // 验证响应

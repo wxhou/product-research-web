@@ -70,13 +70,12 @@ describe('Research Agent Types', () => {
         'rss-wired',
         'rss-producthunt',
         'duckduckgo',
-        'devto',
         'reddit',
         'v2ex',
-        'mcp-fetch',
+        'crawl4ai',
       ];
 
-      expect(sources).toHaveLength(10);
+      expect(sources).toHaveLength(9);
     });
   });
 

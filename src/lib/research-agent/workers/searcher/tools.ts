@@ -66,7 +66,7 @@ function toResearchSearchResult(
   // 验证 source 是否是有效的 DataSourceType
   const validSources = [
     'rss-hackernews', 'rss-techcrunch', 'rss-theverge', 'rss-wired', 'rss-producthunt',
-    'duckduckgo', 'devto', 'reddit', 'v2ex', 'crawl4ai'
+    'duckduckgo', 'reddit', 'v2ex', 'crawl4ai'
   ];
   const sourceStr = dsResult.source;
   const source = validSources.includes(sourceStr)
@@ -250,16 +250,16 @@ export const AVAILABLE_SOURCES: DataSourceType[] = [
   'rss-wired',
   'rss-producthunt',
   'duckduckgo',
-  'devto',
   'reddit',
   'v2ex',
+  'crawl4ai',
 ];
 
 /** 默认启用的数据源 */
 export const DEFAULT_SOURCES: DataSourceType[] = [
   'duckduckgo',
   'rss-hackernews',
-  'devto',
+  'crawl4ai',
 ];
 
 /** 每个数据源的默认超时 */
@@ -267,6 +267,6 @@ export const SOURCE_TIMEOUTS: Partial<Record<DataSourceType, number>> = {
   'rss-hackernews': 10000,
   'rss-techcrunch': 10000,
   'duckduckgo': 15000,
-  'devto': 15000,
+  'crawl4ai': 60000,
   'reddit': 20000,
 };

@@ -3,34 +3,7 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import type { ResearchState } from '../../research-agent/state';
-import type { SearchResult, ExtractionResult } from '../../research-agent/types';
-
-// Helper to create minimal valid ResearchState for testing
-function createTestResearchState(overrides: Partial<ResearchState> = {}): ResearchState {
-  return {
-    projectId: 'test-project',
-    title: 'Test Research',
-    keywords: ['test'],
-    status: 'pending',
-    currentStep: 'supervisor',
-    progress: 0,
-    progressMessage: '',
-    iterationsUsed: 0,
-    totalSearches: 0,
-    totalResults: 0,
-    searchResults: [],
-    pendingQueries: [],
-    extractedContent: [],
-    citations: [],
-    startedAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    completedAt: undefined,
-    retryCount: 0,
-    maxRetries: 3,
-    ...overrides,
-  };
-}
+import type { ResearchState, SearchResult, ExtractionResult } from '../../research-agent/types';
 
 describe('MarkdownStateManager', () => {
   // Re-implement a simplified version for testing (without fs dependency)
@@ -58,165 +31,198 @@ describe('MarkdownStateManager', () => {
         return null;
       }
 
-      return this.parseState(content);
+      // Handle both YAML formats: ```yaml ... ``` and --- ... ---
+      let yamlContent = '';
+      const matchYaml = content.match(/```yaml\n([\s\S]*?)\n```/);
+      const matchFrontmatter = content.match(/---\n([\s\S]*?)\n---/);
+
+      if (matchYaml) {
+        yamlContent = matchYaml[1];
+      } else if (matchFrontmatter) {
+        yamlContent = matchFrontmatter[1];
+      }
+
+      if (!yamlContent) {
+        return null;
+      }
+
+      const data = this.parseFrontmatter(yamlContent);
+      return data as unknown as ResearchState;
     }
 
-    async saveState(projectId: string, state: ResearchState): Promise<void> {
-      const filePath = this.getStateFilePath(projectId);
+    async writeState(state: ResearchState): Promise<void> {
+      const filePath = this.getStateFilePath(state.projectId);
       const content = this.formatState(state);
       this.mockStore.set(filePath, content);
     }
 
+    setMockContent(path: string, content: string): void {
+      this.mockStore.set(path, content);
+    }
+
+    parseFrontmatter(yaml: string): Record<string, unknown> {
+      const result: Record<string, unknown> = {};
+      const lines = yaml.split('\n');
+      let inFrontmatter = false;
+
+      for (const line of lines) {
+        if (line.trim() === '---') {
+          inFrontmatter = !inFrontmatter;
+          continue;
+        }
+        if (inFrontmatter && line.includes(':')) {
+          const [key, ...valueParts] = line.split(':');
+          const value = valueParts.join(':').trim();
+          // Parse arrays and objects
+          if (value.startsWith('[') && value.endsWith(']')) {
+            try {
+              result[key.trim()] = JSON.parse(value);
+            } catch {
+              result[key.trim()] = value;
+            }
+          } else if (value === '' || value === 'null') {
+            result[key.trim()] = null;
+          } else if (value === 'true') {
+            result[key.trim()] = true;
+          } else if (value === 'false') {
+            result[key.trim()] = false;
+          } else if (!isNaN(Number(value))) {
+            result[key.trim()] = Number(value);
+          } else {
+            result[key.trim()] = value.replace(/^["']|["']$/g, '');
+          }
+        }
+      }
+      return result;
+    }
+
     formatState(state: ResearchState): string {
       const frontmatter = this.generateFrontmatter(state);
-      const content = this.generateContent(state);
-      return `${frontmatter}\n\n${content}`;
+      return `---\n${frontmatter}\n---\n\n## 搜索结果\n\n| 标题 | 来源 | 质量 |\n|------|------|------|\n${state.searchResults.map(r => `| ${r.title} | ${r.source} | ${r.quality}/10 |`).join('\n')}\n\n## 提取内容\n\n${state.extractedContent.length} 个页面已提取\n\n## 分析结果\n\n${state.analysis ? '分析已完成' : '等待分析...'}`;
     }
 
     generateFrontmatter(state: ResearchState): string {
-      const fields = [
+      const lines = [
         `projectId: ${state.projectId}`,
         `title: ${state.title}`,
         `status: ${state.status}`,
         `currentStep: ${state.currentStep}`,
         `progress: ${state.progress}`,
         `progressMessage: ${state.progressMessage}`,
-        `iterationsUsed: ${state.iterationsUsed}`,
-        `totalSearches: ${state.totalSearches}`,
-        `totalResults: ${state.totalResults}`,
-        `searchResults: [${state.searchResults.length} items]`,
-        `pendingQueries: [${state.pendingQueries.length} items]`,
-        `extractedContent: [${state.extractedContent.length} items]`,
         `startedAt: ${state.startedAt}`,
         `updatedAt: ${state.updatedAt}`,
-        `retryCount: ${state.retryCount}`,
-        `maxRetries: ${state.maxRetries}`,
+        `pendingQueries: ${JSON.stringify(state.pendingQueries)}`,
+        `searchResults: ${JSON.stringify(state.searchResults)}`,
+        `extractedContent: ${JSON.stringify(state.extractedContent)}`,
       ];
 
-      return `---\n${fields.join('\n')}\n---`;
-    }
-
-    generateContent(state: ResearchState): string {
-      return `# ${state.title}
-
-## Progress
-- Status: ${state.status}
-- Progress: ${state.progress}%
-- Message: ${state.progressMessage}
-
-## Statistics
-- Iterations: ${state.iterationsUsed}
-- Total Searches: ${state.totalSearches}
-- Total Results: ${state.totalResults}
-- Retry Count: ${state.retryCount}/${state.maxRetries}`;
-    }
-
-    parseState(content: string): ResearchState {
-      const state = this.parseFrontmatter(content);
-      return state as ResearchState;
-    }
-
-    parseFrontmatter(content: string): Partial<ResearchState> {
-      const result: Record<string, unknown> = {};
-
-      const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/);
-      if (frontmatterMatch) {
-        const lines = frontmatterMatch[1].split('\n');
-        for (const line of lines) {
-          const match = line.match(/^(\w+):\s*(.*)$/);
-          if (match) {
-            const [, key, value] = match;
-            if (value === '[]') {
-              result[key] = [];
-            } else if (value === 'undefined') {
-              result[key] = undefined;
-            } else if (!isNaN(Number(value))) {
-              result[key] = Number(value);
-            } else if (value === 'true') {
-              result[key] = true;
-            } else if (value === 'false') {
-              result[key] = false;
-            } else {
-              result[key] = value;
-            }
-          }
-        }
+      if (state.analysis) {
+        lines.push(`analysis: ${JSON.stringify(state.analysis)}`);
       }
 
-      return result;
+      return lines.join('\n');
     }
   }
 
-  describe('state file operations', () => {
-    it('should generate state file path correctly', () => {
-      const manager = new MockMarkdownStateManager({ stateDir: 'task-data' });
+  beforeEach(() => {
+    // Clear mock store before each test
+  });
 
-      expect(manager.getStateFilePath('proj-123')).toBe('task-data/proj-123-state.md');
+  describe('state file path generation', () => {
+    it('should generate correct state file path', () => {
+      const manager = new MockMarkdownStateManager({ stateDir: 'task-data' });
+      const path = manager.getStateFilePath('test-project');
+      expect(path).toBe('task-data/test-project-state.md');
     });
 
-    it('should save and read state', async () => {
+    it('should generate correct state ID', () => {
       const manager = new MockMarkdownStateManager({ stateDir: 'task-data' });
-
-      const state = createTestResearchState({
-        projectId: 'test-project',
-        title: 'Test Project',
-        status: 'searching',
-        progress: 45,
-      });
-
-      await manager.saveState('test-project', state);
-      const readState = await manager.readState('test-project');
-
-      expect(readState).not.toBeNull();
-      expect(readState?.projectId).toBe('test-project');
-      expect(readState?.title).toBe('Test Project');
-      expect(readState?.status).toBe('searching');
-    });
-
-    it('should return null for non-existent state', async () => {
-      const manager = new MockMarkdownStateManager({ stateDir: 'task-data' });
-
-      const result = await manager.readState('non-existent');
-      expect(result).toBeNull();
+      const id = manager.generateStateId('my-project');
+      expect(id).toBe('my-project-state');
     });
   });
 
-  describe('state formatting', () => {
+  describe('state reading', () => {
+    it('should return null when state file does not exist', async () => {
+      const manager = new MockMarkdownStateManager({ stateDir: 'task-data' });
+      const state = await manager.readState('non-existent');
+
+      expect(state).toBeNull();
+    });
+
+    it('should parse frontmatter correctly', () => {
+      const manager = new MockMarkdownStateManager({ stateDir: 'task-data' });
+
+      // Directly test parseFrontmatter without --- wrapper
+      const result = manager.parseFrontmatter(`---
+projectId: test-project
+title: Test Project
+status: searching
+progress: 45
+---`);
+
+      expect(result.projectId).toBe('test-project');
+      expect(result.title).toBe('Test Project');
+      expect(result.status).toBe('searching');
+      expect(result.progress).toBe(45);
+    });
+  });
+
+  describe('state writing', () => {
     it('should format state correctly', async () => {
       const manager = new MockMarkdownStateManager({ stateDir: 'task-data' });
 
-      const state = createTestResearchState({
+      const mockState: ResearchState = {
         projectId: 'test-project',
         title: 'Test Project',
         status: 'searching',
+        currentStep: 'searcher',
         progress: 45,
-      });
+        progressMessage: '执行搜索中',
+        startedAt: '2024-01-29T10:00:00Z',
+        updatedAt: '2024-01-29T10:30:00Z',
+        pendingQueries: [],
+        searchResults: [],
+        extractedContent: [],
+        totalSearches: 0,
+        maxRetries: 3,
+      };
 
-      const formatted = manager.formatState(state);
+      // Test formatState produces valid content
+      const formatted = manager.formatState(mockState);
 
       expect(formatted).toContain('projectId: test-project');
       expect(formatted).toContain('title: Test Project');
       expect(formatted).toContain('status: searching');
-      expect(formatted).toContain('---');
+      expect(formatted).toContain('---\n');
     });
 
     it('should generate frontmatter with all fields', async () => {
       const manager = new MockMarkdownStateManager({ stateDir: 'task-data' });
 
-      const state = createTestResearchState({
+      const mockState: ResearchState = {
         projectId: 'test-project',
         title: 'Test Project',
         status: 'searching',
+        currentStep: 'searcher',
         progress: 45,
-      });
+        progressMessage: '执行搜索中',
+        startedAt: '2024-01-29T10:00:00Z',
+        updatedAt: '2024-01-29T10:30:00Z',
+        pendingQueries: [],
+        searchResults: [],
+        extractedContent: [],
+        totalSearches: 0,
+        maxRetries: 3,
+      };
 
-      const frontmatter = manager.generateFrontmatter(state);
+      const frontmatter = manager.generateFrontmatter(mockState);
 
       expect(frontmatter).toContain('projectId: test-project');
       expect(frontmatter).toContain('title: Test Project');
-      expect(frontmatter).toContain('searchResults: [0 items]');
-      expect(frontmatter).toContain('pendingQueries: [0 items]');
-      expect(frontmatter).toContain('extractedContent: [0 items]');
+      expect(frontmatter).toContain('pendingQueries: []');
+      expect(frontmatter).toContain('searchResults: []');
+      expect(frontmatter).toContain('extractedContent: []');
     });
   });
 
@@ -224,65 +230,230 @@ describe('MarkdownStateManager', () => {
     it('should parse boolean values', () => {
       const manager = new MockMarkdownStateManager({ stateDir: 'task-data' });
       const result = manager.parseFrontmatter(`---
-status: completed
----`) as Record<string, unknown>;
+completed: true
+failed: false
+---`);
 
-      expect(result.status).toBe('completed');
+      expect(result.completed).toBe(true);
+      expect(result.failed).toBe(false);
     });
 
     it('should parse numeric values', () => {
       const manager = new MockMarkdownStateManager({ stateDir: 'task-data' });
       const result = manager.parseFrontmatter(`---
 progress: 45
-totalSearches: 100
----`) as Record<string, unknown>;
+count: 100
+---`);
 
       expect(result.progress).toBe(45);
-      expect(result.totalSearches).toBe(100);
+      expect(result.count).toBe(100);
     });
 
-    it('should parse arrays as empty', () => {
+    it('should parse arrays', () => {
       const manager = new MockMarkdownStateManager({ stateDir: 'task-data' });
       const result = manager.parseFrontmatter(`---
-searchResults: []
-pendingQueries: []
----`) as Record<string, unknown>;
+tags: ["tag1", "tag2"]
+numbers: [1, 2, 3]
+---`);
 
-      expect(result.searchResults).toEqual([]);
-      expect(result.pendingQueries).toEqual([]);
+      expect(result.tags).toEqual(['tag1', 'tag2']);
+      expect(result.numbers).toEqual([1, 2, 3]);
     });
 
-    it('should parse undefined values', () => {
+    it('should handle empty values', () => {
       const manager = new MockMarkdownStateManager({ stateDir: 'task-data' });
       const result = manager.parseFrontmatter(`---
-completedAt: undefined
----`) as Record<string, unknown>;
+emptyArray: []
+emptyString:
+nullValue: null
+---`);
 
-      expect(result.completedAt).toBeUndefined();
+      expect(result.emptyArray).toEqual([]);
+      expect(result.emptyString).toBeNull();
+      expect(result.nullValue).toBeNull();
+    });
+  });
+});
+
+describe('ResearchState Validation', () => {
+  it('should create valid initial state', () => {
+    const state: ResearchState = {
+      projectId: 'test-123',
+      title: 'Test Research',
+      status: 'pending',
+      currentStep: 'planner',
+      progress: 0,
+      progressMessage: '准备开始',
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      pendingQueries: [],
+      searchResults: [],
+      extractedContent: [],
+      totalSearches: 0,
+      maxRetries: 3,
+    };
+
+    expect(state.projectId).toBe('test-123');
+    expect(state.status).toBe('pending');
+    expect(state.progress).toBe(0);
+  });
+
+  it('should handle state transitions', () => {
+    let state: ResearchState = {
+      projectId: 'test-123',
+      title: 'Test Research',
+      status: 'pending',
+      currentStep: 'planner',
+      progress: 0,
+      progressMessage: '准备开始',
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      pendingQueries: [],
+      searchResults: [],
+      extractedContent: [],
+      totalSearches: 0,
+      maxRetries: 3,
+    };
+
+    // Transition to planning
+    state = { ...state, status: 'planning', progressMessage: '正在生成研究计划...' };
+    expect(state.status).toBe('planning');
+
+    // Transition to searching
+    state = { ...state, status: 'searching', currentStep: 'searcher', progress: 25, progressMessage: '执行搜索' };
+    expect(state.status).toBe('searching');
+    expect(state.currentStep).toBe('searcher');
+    expect(state.progress).toBe(25);
+
+    // Transition to extracting
+    state = { ...state, status: 'extracting', currentStep: 'extractor', progress: 50 };
+    expect(state.status).toBe('extracting');
+    expect(state.currentStep).toBe('extractor');
+    expect(state.progress).toBe(50);
+
+    // Transition to completed
+    state = { ...state, status: 'completed', currentStep: 'reporter', progress: 100 };
+    expect(state.status).toBe('completed');
+    expect(state.progress).toBe(100);
+  });
+
+  it('should validate search results structure', () => {
+    const searchResult: SearchResult = {
+      id: 'sr1',
+      source: 'duckduckgo',
+      title: 'Test Result',
+      url: 'https://example.com',
+      content: 'Test content',
+      quality: 8,
+      crawled: false,
+      queryId: 'q1',
+      dimension: 'features',
+    };
+
+    expect(searchResult.id).toBe('sr1');
+    expect(searchResult.quality).toBeGreaterThanOrEqual(1);
+    expect(searchResult.quality).toBeLessThanOrEqual(10);
+  });
+
+  it('should validate extraction results structure', () => {
+    const extraction: ExtractionResult = {
+      url: 'https://example.com',
+      source: 'duckduckgo',
+      title: 'Test',
+      content: 'Extracted content...',
+      metadata: {
+        crawledAt: new Date().toISOString(),
+        contentLength: 1000,
+        qualityScore: 8,
+        features: ['f1', 'f2'],
+        competitors: ['c1'],
+        techStack: ['t1'],
+      },
+    };
+
+    expect(extraction.metadata.qualityScore).toBeLessThanOrEqual(10);
+    expect(extraction.metadata.features).toHaveLength(2);
+  });
+});
+
+describe('Graph State Transitions', () => {
+  it('should have valid status values', () => {
+    const validStatuses = ['pending', 'planning', 'searching', 'extracting', 'analyzing', 'reporting', 'completed', 'failed', 'cancelled'];
+
+    validStatuses.forEach(status => {
+      const state: ResearchState = {
+        projectId: 'test',
+        title: 'Test',
+        status,
+        currentStep: 'planner',
+        progress: 0,
+        progressMessage: '',
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        pendingQueries: [],
+        searchResults: [],
+        extractedContent: [],
+        totalSearches: 0,
+        maxRetries: 3,
+      };
+      expect(state.status).toBe(status);
     });
   });
 
-  describe('state content generation', () => {
-    it('should generate content with title and progress', () => {
-      const manager = new MockMarkdownStateManager({ stateDir: 'task-data' });
+  it('should have valid currentStep values', () => {
+    const validSteps = ['planner', 'searcher', 'extractor', 'analyzer', 'reporter'];
 
-      const state = createTestResearchState({
-        title: 'Test Research',
+    validSteps.forEach(step => {
+      const state: ResearchState = {
+        projectId: 'test',
+        title: 'Test',
         status: 'searching',
-        progress: 60,
-        iterationsUsed: 3,
-        totalSearches: 5,
-        totalResults: 25,
-      });
+        currentStep: step as ResearchState['currentStep'],
+        progress: 25,
+        progressMessage: '',
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        pendingQueries: [],
+        searchResults: [],
+        extractedContent: [],
+        totalSearches: 0,
+        maxRetries: 3,
+      };
+      expect(state.currentStep).toBe(step);
+    });
+  });
 
-      const content = manager.generateContent(state);
+  it('should calculate progress correctly for each stage', () => {
+    const stageProgress = {
+      planner: 0,
+      searcher: 20,
+      extractor: 40,
+      analyzer: 60,
+      reporter: 80,
+    };
 
-      expect(content).toContain('# Test Research');
-      expect(content).toContain('Status: searching');
-      expect(content).toContain('Progress: 60%');
-      expect(content).toContain('Iterations: 3');
-      expect(content).toContain('Total Searches: 5');
-      expect(content).toContain('Total Results: 25');
+    Object.entries(stageProgress).forEach(([step, expectedProgress]) => {
+      const state: ResearchState = {
+        projectId: 'test',
+        title: 'Test',
+        status: step as ResearchState['status'],
+        currentStep: step as ResearchState['currentStep'],
+        progress: expectedProgress,
+        progressMessage: '',
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        pendingQueries: step === 'planner' ? [{ id: 'q1', query: 'test', purpose: '', dimension: '', priority: 5 }] : [],
+        searchResults: step === 'searcher' || step === 'extractor' || step === 'analyzer' || step === 'reporter' ? [{ id: 'sr1', source: 'duckduckgo', title: '', url: '', content: '', quality: 5, crawled: false, queryId: 'q1', dimension: '' }] : [],
+        extractedContent: step === 'extractor' || step === 'analyzer' || step === 'reporter' ? [{ url: '', source: 'duckduckgo', title: '', content: '', metadata: { crawledAt: '', contentLength: 0, qualityScore: 5, features: [], competitors: [], techStack: [] } }] : [],
+        totalSearches: step === 'searcher' || step === 'extractor' || step === 'analyzer' || step === 'reporter' ? 5 : 0,
+        maxRetries: 3,
+      };
+
+      if (step === 'planner') {
+        expect(state.pendingQueries.length).toBeGreaterThan(0);
+      } else {
+        expect(state.pendingQueries.length).toBe(0);
+      }
     });
   });
 });

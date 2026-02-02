@@ -2,8 +2,8 @@
  * Progress Module Tests
  */
 
-import { describe, it, expect } from '@jest/globals';
-import type { ResearchState } from '../../research-agent/state';
+import { describe, it, expect, beforeEach } from '@jest/globals';
+import type { ResearchState } from '../research-agent/types';
 
 // Import from the actual calculator module
 import {

@@ -15,7 +15,7 @@ import {
   type NodeFunction,
   type CompiledGraph,
 } from './state-graph';
-import { createMemoryCheckpointer } from './checkpoint';
+import { createMemoryCheckpointer, createFileCheckpointer, type CheckpointSaver } from './checkpoint';
 
 // ============================================================
 // 传统 Builder 模式（保持向后兼容）
@@ -260,13 +260,13 @@ export function createResearchGraph(
   config?: {
     nodeTimeout?: number;
     maxIterations?: number;
-    checkpointer?: ReturnType<typeof createMemoryCheckpointer>;
+    checkpointer?: CheckpointSaver;
   }
 ): CompiledGraph<ResearchState> {
   return createDefaultResearchGraph(agentNodes, {
     nodeTimeout: config?.nodeTimeout ?? 300000,
     maxIterations: config?.maxIterations ?? 20,
-    checkpointer: config?.checkpointer ?? createMemoryCheckpointer(),
+    checkpointer: config?.checkpointer ?? createFileCheckpointer(),
   });
 }
 

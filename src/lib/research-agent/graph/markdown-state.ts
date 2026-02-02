@@ -142,7 +142,9 @@ export class MarkdownStateManager {
     const opts = { ...DEFAULT_READ_OPTIONS, ...options };
 
     if (!this.fs.existsSync(filePath)) {
-      console.warn(`[StateManager] State file not found: ${filePath}`);
+      // 状态文件不存在是正常的（首次运行或任务已完成）
+      // 使用 debug 级别避免日志噪音
+      console.debug(`[StateManager] State file not found: ${filePath}`);
       return null;
     }
 
@@ -655,6 +657,8 @@ ${state.completedAt ? `- **完成时间**: ${new Date(state.completedAt).toLocal
         growthRate: '',
         keyPlayers: [],
         trends: [],
+        opportunities: [],
+        challenges: [],
       },
       confidenceScore: 0.5,
       dataGaps: [],

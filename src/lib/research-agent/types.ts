@@ -112,7 +112,7 @@ export interface ExtractionResult {
     features: string[];
     competitors: string[];
     techStack: string[];
-    filePath?: string;  // 新架构：本地文件路径
+    filePath?: string;
   };
 }
 
@@ -151,14 +151,55 @@ export interface MarketData {
   growthRate: string;
   keyPlayers: string[];
   trends: string[];
+  opportunities: string[];
+  challenges: string[];
 }
 
-/** 分析结果 */
-export interface AnalysisResult {
+/** 技术栈分析 */
+export interface TechStackAnalysis {
+  architecture: string[];
+  techStack: string[];
+  emergingTech: string[];
+  innovationPoints: string[];
+}
+
+/** 使用场景分析 */
+export interface UseCaseAnalysis {
+  scenarios: Array<{
+    name: string;
+    description: string;
+    targetUsers: string[];
+    value: string;
+  }>;
+  userTypes: string[];
+  painPoints: string[];
+  valuePropositions: string[];
+}
+
+/** 详细分析报告 */
+export interface DetailedAnalysis {
   features: FeatureAnalysis[];
   competitors: CompetitorAnalysis[];
   swot: SWOTAnalysis;
   marketData: MarketData;
+  techStack: TechStackAnalysis;
+  useCases: UseCaseAnalysis;
+  recommendations: {
+    shortTerm: string[];
+    mediumTerm: string[];
+    longTerm: string[];
+  };
+  confidenceScore: number;
+  dataGaps: string[];
+}
+
+/** 分析结果 - 保持向后兼容 */
+export interface AnalysisResult extends Partial<DetailedAnalysis> {
+  features: FeatureAnalysis[];
+  competitors: CompetitorAnalysis[];
+  swot: SWOTAnalysis;
+  marketData: MarketData;
+  techAnalysis?: TechStackAnalysis;
   confidenceScore: number;
   dataGaps: string[];
 }
