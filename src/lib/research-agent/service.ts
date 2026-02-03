@@ -11,12 +11,14 @@ import type { AgentName } from './types';
 import type { SupervisorDecision } from './supervisor';
 import type { CompiledGraph, GraphExecutionResult } from './graph';
 import type { LangGraphCheckpointConfig } from './graph/checkpoint';
+import type { DataSourceType } from '@/lib/datasources';
 import {
   createResearchGraph,
   createSimpleResearchGraph,
 } from './graph/builder';
 import { createFileCheckpointer, deleteStateFile } from './graph/checkpoint';
 import { createSupervisorAgent } from './supervisor';
+import { getDataSourceManager } from '@/lib/datasources';
 
 // ============================================================
 // 类型定义
@@ -111,7 +113,7 @@ export function createResearchTaskExecutor(config: ResearchTaskConfig): Research
       supervisor: createSupervisorNode(supervisor),
     },
     {
-      nodeTimeout: 300000, // 5 分钟
+      nodeTimeout: 600000, // 10 分钟（analyzer 需要更多时间做 LLM 去重）
       maxIterations: 20,
       checkpointer,
     }
@@ -357,8 +359,14 @@ function createSearcherNode(config: ResearchTaskConfig): (state: ResearchState) 
     console.log(`[Searcher] Executing searches for ${config.projectId}`);
 
     try {
+      // 获取配置的数据源
+      const dataSourceManager = getDataSourceManager();
+      const enabledSources = dataSourceManager.getEnabledSources();
+      console.log(`[Searcher] Using ${enabledSources.length} data sources: ${enabledSources.join(', ')}`);
+
       const { createSearcherAgent } = await import('./workers/searcher');
-      const agent = createSearcherAgent();
+      // 传递配置的数据源到搜索器
+      const agent = createSearcherAgent({ enabledSources: enabledSources as any });
       const result = await agent.execute(state);
 
       if (result.success) {

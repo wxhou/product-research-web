@@ -39,6 +39,8 @@ describe('Analyzer Worker', () => {
           growthRate: '15%',
           keyPlayers: ['西门子', 'GE', 'PTC'],
           trends: ['AI融合', '边缘计算'],
+          opportunities: [],
+          challenges: [],
         },
         confidenceScore: 0.85,
         dataGaps: [],
@@ -67,6 +69,8 @@ describe('Analyzer Worker', () => {
             growthRate: '',
             keyPlayers: [],
             trends: [],
+            opportunities: [],
+            challenges: [],
           },
           confidenceScore: score,
           dataGaps: [],
@@ -174,12 +178,16 @@ describe('Analyzer Worker', () => {
         growthRate: '15-20%',
         keyPlayers: ['厂商A', '厂商B', '厂商C'],
         trends: ['AI融合', '边缘计算'],
+        opportunities: ['数字化转型'],
+        challenges: ['技术门槛高'],
       };
 
       expect(marketData.marketSize).toBeDefined();
       expect(marketData.growthRate).toBeDefined();
       expect(marketData.keyPlayers).toHaveLength(3);
       expect(marketData.trends).toHaveLength(2);
+      expect(marketData.opportunities).toBeDefined();
+      expect(marketData.challenges).toBeDefined();
     });
   });
 });

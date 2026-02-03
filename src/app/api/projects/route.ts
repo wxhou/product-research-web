@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db, { projectDb, reportDb, searchResultDb, settingsDb } from '@/lib/db';
+import path from 'path';
+import fs from 'fs';
 
 interface Project {
   id: string;
@@ -17,6 +19,7 @@ interface Project {
 interface SearchResult {
   id: string;
   project_id: string;
+  source: string;
   title: string;
   url: string;
   content: string;
@@ -32,7 +35,43 @@ interface Report {
   created_at: string;
 }
 
-// 获取当前用户信息
+// 从文件系统获取搜索结果（当数据库中没有时）
+function getSearchResultsFromFileSystem(projectId: string): SearchResult[] {
+  try {
+    const taskDataDir = path.join(process.cwd(), 'task-data');
+    const manifestPath = path.join(taskDataDir, `project-${projectId}`, 'manifest.json');
+
+    if (!fs.existsSync(manifestPath)) {
+      return [];
+    }
+
+    const manifestContent = fs.readFileSync(manifestPath, 'utf-8');
+    const manifest = JSON.parse(manifestContent);
+
+    // 从 manifest.raw 构建搜索结果
+    const results: SearchResult[] = [];
+    if (manifest.raw) {
+      Object.entries(manifest.raw as Record<string, { status: string; size?: number }>).forEach(([key, value]) => {
+        if (value.status === 'completed') {
+          results.push({
+            id: `${projectId}-${key}`,
+            project_id: projectId,
+            source: 'web-crawl',
+            title: `爬取文档 ${key}`,
+            url: `file://raw/${key}.md`,
+            content: '',
+            created_at: new Date().toISOString(),
+          });
+        }
+      });
+    }
+
+    return results;
+  } catch (error) {
+    console.error('Error reading search results from filesystem:', error);
+    return [];
+  }
+}
 function getCurrentUser(request: NextRequest): { id: string; username: string; role: string } | null {
   const sessionToken = request.cookies.get('auth_token')?.value;
   if (!sessionToken) return null;
@@ -81,7 +120,11 @@ export async function GET(request: NextRequest) {
       }
 
       // 获取关联的搜索结果和报告
-      const searchResults = searchResultDb.getByProject.all({ project_id: id }) as SearchResult[];
+      let searchResults = searchResultDb.getByProject.all({ project_id: id }) as SearchResult[];
+      // 如果数据库中没有搜索结果，尝试从文件系统获取
+      if (searchResults.length === 0) {
+        searchResults = getSearchResultsFromFileSystem(id);
+      }
       const report = reportDb.getByProject.get({ project_id: id }) as (Report & { used_llm: number }) | undefined;
 
       return NextResponse.json({

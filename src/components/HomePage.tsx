@@ -132,8 +132,8 @@ export default function HomePage() {
   };
 
   return (
-    <main className="home">
-      {/* Hero Section */}
+    <main className="home-page">
+      {/* Recent Projects */}
       <section className="hero">
         <div className="hero-content animate-fade-in-up">
           <div className="hero-badge">

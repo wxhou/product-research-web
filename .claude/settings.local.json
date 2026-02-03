@@ -56,7 +56,17 @@
       "Bash(npx eslint:*)",
       "Bash(node -e \"\nconst { FileStorageService } = require\\(''./src/lib/file-storage''\\);\nconst fs = require\\(''fs''\\);\n\n// 创建服务\nconst service = new FileStorageService\\({ baseDir: ''task-data'' }\\);\n\n// 测试创建项目目录\nconst projectId = ''test-new-project'';\nconst projectPath = service.createProjectDir\\(projectId\\);\nconsole.log\\(''Created project path:'', projectPath\\);\nconsole.log\\(''Directory exists:'', fs.existsSync\\(projectPath\\)\\);\n\n// 初始化索引\nservice.initProjectIndex\\(projectPath, projectId, ''Test Project'', ''Description'', [''keyword1'', ''keyword2'']\\);\nconsole.log\\(''Index file exists:'', fs.existsSync\\(projectPath + ''/index.json''\\)\\);\n\n// 清理测试目录\nconst { execSync } = require\\(''child_process''\\);\nexecSync\\(''rm -rf task-data/project-test-new-project''\\);\nconsole.log\\(''Test directory cleaned up''\\);\n\")",
       "Bash(npx ts-node:*)",
-      "Bash(tail:*)"
+      "Bash(tail:*)",
+      "mcp__chrome-devtools__list_network_requests",
+      "mcp__chrome-devtools__get_network_request",
+      "Bash(openspec status:*)",
+      "Bash(openspec tasks:*)",
+      "Bash(cat:*)",
+      "Bash(openspec archive:*)",
+      "Bash(npm run test -- --run src/lib/__tests__/research-agent/ --passWithNoTests)",
+      "Bash(npm run test:*)",
+      "Bash(npx jest:*)",
+      "Bash(git checkout:*)"
     ]
   }
 }

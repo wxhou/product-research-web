@@ -170,6 +170,11 @@ async function executeIncrementalAnalysis(
 ): Promise<AnalyzerResult> {
   const { projectId, title, description, projectPath } = state;
 
+  // 在增量分析模式下，所有爬取的文件都应该参与报告生成
+  // 每个文件单独处理并增量合并，确保报告完整性
+  const filesToProcess = rawFiles;
+  const skippedFiles = 0;
+
   // 初始化累积分析结果
   let accumulatedAnalysis: Partial<AnalysisResult> = {
     features: [],
@@ -204,14 +209,14 @@ async function executeIncrementalAnalysis(
   await updateProgress(projectId, {
     stage: 'analyzing',
     step: `开始增量分析`,
-    totalItems: rawFiles.length + 3,
+    totalItems: filesToProcess.length + 3,
     completedItems: 0,
-    currentItem: `处理 1/${rawFiles.length} 个文件`,
+    currentItem: `处理 1/${filesToProcess.length} 个文件`,
   });
 
   // 逐个处理文件
-  for (let i = 0; i < rawFiles.length; i++) {
-    const file = rawFiles[i];
+  for (let i = 0; i < filesToProcess.length; i++) {
+    const file = filesToProcess[i];
 
     // 检查取消
     if (isCancelled()) {
@@ -228,13 +233,13 @@ async function executeIncrementalAnalysis(
       content = content.slice(0, maxContentLength * 0.9) + '\n\n[内容已截断]';
     }
 
-    console.log(`[Analyzer] 处理文件 ${i + 1}/${rawFiles.length}: ${file.info.title}`);
+    console.log(`[Analyzer] 处理文件 ${i + 1}/${filesToProcess.length}: ${file.info.title}`);
 
     // 更新进度
     await updateProgress(projectId, {
       stage: 'analyzing',
-      step: `分析文件 ${i + 1}/${rawFiles.length}`,
-      totalItems: rawFiles.length + 3,
+      step: `分析文件 ${i + 1}/${filesToProcess.length}`,
+      totalItems: filesToProcess.length + 3,
       completedItems: i,
       currentItem: file.info.title.substring(0, 30),
     });
@@ -264,13 +269,13 @@ async function executeIncrementalAnalysis(
   await updateProgress(projectId, {
     stage: 'analyzing',
     step: '保存分析结果',
-    totalItems: rawFiles.length + 3,
-    completedItems: rawFiles.length,
+    totalItems: filesToProcess.length + 3,
+    completedItems: filesToProcess.length,
     currentItem: '保存文件...',
   });
 
   // 评估置信度（基于处理的文件数量）
-  const fileCount = rawFiles.length;
+  const fileCount = filesToProcess.length;
   const baseConfidence = accumulatedAnalysis.confidenceScore || 0;
   // 文件越多，置信度应该越高（但有上限）
   const adjustedConfidence = Math.min(0.95, baseConfidence + (fileCount > 3 ? 0.1 : 0));
@@ -462,16 +467,35 @@ async function analyzeSingleFile(
   // 调用 LLM 生成 JSON 响应
   const responseText = await generateText(prompt);
 
-  // 解析 JSON
+  // 解析 JSON（带更详细的错误处理）
   let response: Record<string, unknown>;
   try {
     const jsonContent = responseText
       .match(/```json\s*([\s\S]*?)\s*```/)?.[1]
       || responseText.match(/\{[\s\S]*\}/)?.[0]
       || responseText;
+
+    if (!jsonContent || jsonContent.trim().length < 10) {
+      throw new Error('LLM 返回内容为空或过短');
+    }
+
     response = JSON.parse(jsonrepair(jsonContent));
   } catch (parseError) {
-    throw new Error(`无法解析 LLM 响应为 JSON: ${(parseError as Error).message}`);
+    // 如果 JSON 解析失败，记录错误并返回空结果
+    // 注意：不尝试正则提取，因为不可靠
+    const errorMsg = parseError instanceof Error ? parseError.message : '未知错误';
+    console.warn(`[Analyzer] JSON 解析失败: ${errorMsg}`);
+
+    // 返回空结果，让增量模式继续处理下一个文件
+    return {
+      features: [],
+      competitors: [],
+      swot: { strengths: [], weaknesses: [], opportunities: [], threats: [] },
+      marketData: { marketSize: '', growthRate: '', keyPlayers: [], trends: [], opportunities: [], challenges: [] },
+      techAnalysis: { architecture: [], techStack: [], emergingTech: [], innovationPoints: [] },
+      confidenceScore: 0.2,
+      dataGaps: [`文件分析失败: ${errorMsg.substring(0, 50)}`],
+    };
   }
 
   // 提取结果

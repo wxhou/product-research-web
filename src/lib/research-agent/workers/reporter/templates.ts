@@ -23,7 +23,7 @@ export interface ReportSectionConfig {
 /** Mermaid 图表配置 */
 export interface MermaidChartConfig {
   id: string;
-  type: 'pie' | 'mindmap' | 'timeline' | 'radar' | 'graph' | 'quadrant' | 'journey' | 'stateDiagram';
+  type: 'pie' | 'mindmap' | 'timeline' | 'radar' | 'graph' | 'quadrant' | 'journey' | 'stateDiagram' | 'xychart' | 'gantt';
   title: string;
   required: boolean;
 }
@@ -34,7 +34,7 @@ export interface ReportMetadataConfig {
   generatedAt: string;
 }
 
-/** 默认报告模板 */
+/** 默认报告模板 - 增强版 */
 export const REPORT_TEMPLATE: ReportTemplate = {
   sections: [
     {
@@ -50,7 +50,9 @@ export const REPORT_TEMPLATE: ReportTemplate = {
 - 产品定位：{productPositioning}
 - 主要竞争优势：{keyStrengths}
 - 市场机会：{marketOpportunity}
-- 建议关注领域：{recommendationFocus}`,
+- 建议关注领域：{recommendationFocus}
+- 数据完整度：**{dataCompletenessScore}分**
+- 数据来源可信度：**{sourceCredibilityScore}分**`,
     },
     {
       id: 'overview',
@@ -67,16 +69,68 @@ export const REPORT_TEMPLATE: ReportTemplate = {
 | 识别功能数 | {featureCount} |
 | 识别竞品数 | {competitorCount} |
 | 分析置信度 | {confidenceScore}% |
+| 数据完整度评分 | {dataCompletenessScore}/100 |
+| 数据来源可信度 | {sourceCredibilityScore}/100 |
 | 数据缺口 | {dataGaps} |`,
+    },
+    {
+      id: 'market',
+      title: '市场分析',
+      required: true,
+      order: 3,
+      template: `## 2. 市场分析
+
+### 2.1 市场规模
+
+| 指标 | 数据 |
+|-----|------|
+| 市场规模范围 | {marketSizeRange} |
+| 增长率 | {growthRate} |
+| 置信度等级 | {confidenceLevel} |
+| 数据来源 | {dataSource} |
+
+### 2.2 市场规模趋势
+
+\`\`\`mermaid
+xychart-beta
+    title "市场规模趋势与预测"
+    x-axis [2022, 2023, 2024, 2025, 2026, 2028]
+    y-axis "市场规模 (USD)" 0 --> 200
+    bar [30, 45, 60, 75, 90, 120]
+\`\`\`
+
+### 2.3 历史增长率
+
+| 年份 | 增长率 | 数据来源 |
+|-----|-------|---------|
+{marketGrowthHistory}
+
+### 2.4 市场驱动因素
+
+{marketDrivers}
+
+### 2.5 市场制约因素
+
+{marketConstraints}
+
+### 2.6 市场预测（未来 {forecastYears} 年）
+
+| 年份 | 预测规模 | 预测增长率 | 预测方法 |
+|-----|---------|-----------|---------|
+{marketForecasts}
+
+### 2.7 主要玩家
+
+{keyPlayers}`,
     },
     {
       id: 'features',
       title: '功能分析',
       required: true,
-      order: 3,
-      template: `## 2. 功能分析
+      order: 4,
+      template: `## 3. 功能分析
 
-### 2.1 核心功能列表
+### 3.1 核心功能列表
 
 以下是我们识别出的产品核心功能，按出现频率排序：
 
@@ -84,15 +138,13 @@ export const REPORT_TEMPLATE: ReportTemplate = {
 |-----|---------|------|---------|
 {featureTableRows}
 
-### 2.2 功能频率分布
-
-功能出现频率反映了产品在各功能上的投入程度和用户关注度。
+### 3.2 功能频率分布
 
 [PIE_CHART]
 {featurePieChart}
 [/PIE_CHART]
 
-### 2.3 功能价值分析
+### 3.3 功能价值分析
 
 基于深度分析，我们识别出以下核心功能及其用户价值：
 
@@ -102,10 +154,10 @@ export const REPORT_TEMPLATE: ReportTemplate = {
       id: 'competitors',
       title: '竞品分析',
       required: true,
-      order: 4,
-      template: `## 3. 竞品分析
+      order: 5,
+      template: `## 4. 竞品分析
 
-### 3.1 竞品总览
+### 4.1 竞品总览
 
 我们识别出以下主要竞争对手，并对其进行了深度分析：
 
@@ -113,48 +165,152 @@ export const REPORT_TEMPLATE: ReportTemplate = {
 |---------|------|---------|---------|
 {competitorTableRows}
 
-### 3.2 竞品深度对比
+### 4.2 竞品定量对比
+
+#### 4.2.1 市场份额
+
+\`\`\`mermaid
+pie title 市场份额分布 ({currentYear})
+{marketSharePie}
+\`\`\`
+
+#### 4.2.2 LTV/CAC 比率
+
+| 竞品 | LTV/CAC 比率 | 健康度评估 |
+|------|-------------|-----------|
+{ltvCacRatio}
+
+### 4.3 竞品深度对比
 
 {competitorAnalysis}
 
-### 3.3 竞品差异化分析
+### 4.4 竞品差异化分析
 
 通过对比分析，我们发现各竞品之间的差异化特征：
 
 {competitorDifferentiation}
 
-### 3.4 市场空白点
+### 4.5 市场空白点
 
 {marketGaps}
+
+### 4.6 竞争格局矩阵
+
+\`\`\`mermaid
+radar
+  title 竞品对比
+  axes: 产品功能, 价格竞争力, 用户体验, 技术创新, 市场覆盖
+  竞品A: [80, 70, 85, 75, 60]
+  竞品B: [70, 85, 75, 80, 70]
+  目标产品: [75, 80, 70, 85, 65]
+\`\`\`
 
 [MINDMAP_CHART]
 {competitorMindmap}
 [/MINDMAP_CHART]`,
     },
     {
+      id: 'business-model',
+      title: '商业模式分析',
+      required: false,
+      order: 6,
+      template: `## 5. 商业模式分析
+
+### 5.1 定价模式
+
+**定价类型：** {pricingModelType}
+
+| 套餐 | 价格 | 包含功能 |
+|-----|------|---------|
+{pricingTiers}
+
+### 5.2 Unit Economics 分析
+
+| 指标 | 数值 | 评估 |
+|-----|------|-----|
+| 毛利率 | {contributionMargin}% | {marginAssessment} |
+| 盈亏平衡时间 | {breakEvenTime} | - |
+| 免费转付费率 | {conversionRate}% | {conversionAssessment} |
+| ARPPU | {arppu} | {arppuAssessment} |
+
+### 5.3 商业化成熟度评估
+
+**成熟度等级：** {commercialMaturityRating}
+
+**评估说明：** {commercialMaturityAssessment}
+
+### 5.4 关键指标
+
+- 月经常性收入 (MRR)：{mrr}
+- 客户生命周期价值 (LTV)：{ltv}
+- 客户获取成本 (CAC)：{cac}
+- 月流失率：{churnRate}
+- 净推荐值 (NPS)：{nps}`,
+    },
+    {
+      id: 'user-research',
+      title: '用户研究',
+      required: false,
+      order: 7,
+      template: `## 6. 用户研究
+
+### 6.1 调研方法
+
+**研究方法：** {researchMethodology}
+
+**样本信息：**
+- 样本量：{sampleSize}
+- 置信水平：{confidenceLevel}%
+- 误差范围：±{marginOfError}%
+
+### 6.2 用户画像
+
+{userPersonas}
+
+### 6.3 渗透率分析
+
+| 用户群体 | 渗透率 |
+|---------|-------|
+{penetrationRates}
+
+### 6.4 用户满意度
+
+**净推荐值 (NPS)：** {npsScore}
+
+**满意度评分：** {satisfactionScore}/10
+
+**关键反馈：** {keyFeedback}
+
+### 6.5 用户采纳趋势
+
+| 阶段 | 用户占比 | 描述 |
+|-----|---------|-----|
+{adoptionTrends}`,
+    },
+    {
       id: 'swot',
       title: 'SWOT 分析',
       required: true,
-      order: 5,
-      template: `## 4. SWOT 分析
+      order: 8,
+      template: `## 7. SWOT 分析
 
-### 4.1 优势 (Strengths)
+### 7.1 优势 (Strengths)
 
 {strengths}
 
-### 4.2 劣势 (Weaknesses)
+### 7.2 劣势 (Weaknesses)
 
 {weaknesses}
 
-### 4.3 机会 (Opportunities)
+### 7.3 机会 (Opportunities)
 
 {opportunities}
 
-### 4.4 威胁 (Threats)
+### 7.4 威胁 (Threats)
 
 {threats}
 
-### 4.5 SWOT 战略矩阵
+### 7.5 SWOT 战略矩阵
 
 基于以上分析，我们提出以下战略建议：
 
@@ -163,7 +319,7 @@ export const REPORT_TEMPLATE: ReportTemplate = {
 - **ST 策略（优势+威胁）**：强化核心竞争壁垒，应对竞争压力
 - **WT 策略（劣势+威胁）**：聚焦核心业务，避免多线作战
 
-### 4.6 SWOT 思维导图
+### 7.6 SWOT 思维导图
 
 [MINDMAP_CHART]
   root((SWOT 分析))
@@ -178,88 +334,15 @@ export const REPORT_TEMPLATE: ReportTemplate = {
 [/MINDMAP_CHART]`,
     },
     {
-      id: 'market',
-      title: '市场分析',
-      required: false,
-      order: 6,
-      template: `## 5. 市场分析
-
-### 5.1 市场规模与趋势
-
-| 指标 | 数据 |
-|-----|------|
-| 市场规模 | {marketSize} |
-| 增长率 | {growthRate} |
-| 主要玩家 | {keyPlayers} |
-
-### 5.2 市场发展趋势
-
-{marketTrends}
-
-### 5.3 市场机会分析
-
-{marketOpportunities}
-
-### 5.4 市场挑战与风险
-
-{marketChallenges}`,
-    },
-    {
-      id: 'technology',
-      title: '技术分析',
-      required: false,
-      order: 7,
-      template: `## 6. 技术分析
-
-### 6.1 技术架构
-
-{architecture}
-
-### 6.2 技术栈
-
-{techStack}
-
-### 6.3 新兴技术应用
-
-{emergingTech}
-
-### 6.4 技术创新点
-
-{innovationPoints}`,
-    },
-    {
-      id: 'usecases',
-      title: '使用场景分析',
-      required: false,
-      order: 8,
-      template: `## 7. 使用场景分析
-
-### 7.1 主要使用场景
-
-{useCaseScenarios}
-
-### 7.2 目标用户类型
-
-{userTypes}
-
-### 7.3 用户痛点分析
-
-{painPoints}
-
-### 7.4 产品价值主张
-
-{valuePropositions}`,
-    },
-    {
       id: 'recommendations',
       title: '战略建议',
       required: true,
       order: 9,
       template: `## 8. 战略建议
 
-基于以上深度分析，我们提出以下战略建议：
+基于以上深度分析，我们提出以下遵循 SMART 原则的战略建议：
 
-### 8.1 短期行动（0-3个月）
+### 8.1 短期行动（0-6个月）
 
 {shortTermRecommendations}
 
@@ -268,7 +351,12 @@ export const REPORT_TEMPLATE: ReportTemplate = {
 2. 建立标杆客户案例，验证产品价值
 3. 优化定价策略，降低客户尝试门槛
 
-### 8.2 中期规划（3-12个月）
+**关键里程碑：**
+- [ ] 第1个月：完成市场调研和竞品分析报告
+- [ ] 第3个月：推出核心功能优化版本
+- [ ] 第6个月：获得首批付费客户验证
+
+### 8.2 中期规划（6-12个月）
 
 {mediumTermRecommendations}
 
@@ -284,30 +372,121 @@ export const REPORT_TEMPLATE: ReportTemplate = {
 **愿景目标：**
 1. 成为细分领域领先供应商
 2. 建立开放生态系统，吸引第三方开发者
-3. 探索国际化机会，拓展海外市场`,
+3. 探索国际化机会，拓展海外市场
+
+### 8.4 实施路线图
+
+\`\`\`mermaid
+gantt
+    title 实施路线图
+    dateFormat  YYYY-MM-DD
+    section 短期 (0-6个月)
+    市场调研 :active, 2025-02-01, 30d
+    产品优化 :2025-03-01, 60d
+    section 中期 (6-12个月)
+    功能扩展 :2025-08-01, 90d
+    渠道建设 :2025-09-01, 60d
+    section 长期 (1-3年)
+    生态建设 :2026-02-01, 365d
+    国际化探索 :2027-02-01, 365d
+\`\`\``,
+    },
+    {
+      id: 'data-visualization',
+      title: '数据可视化',
+      required: false,
+      order: 10,
+      template: `## 9. 数据可视化
+
+### 9.1 用户细分热力图
+
+{userSegmentationHeatmap}
+
+### 9.2 产业链上下游关系
+
+\`\`\`mermaid
+graph LR
+  subgraph 上游
+  U1[原材料]
+  U2[技术]
+  end
+
+  subgraph 中游
+  M1[产品开发]
+  M2[服务提供]
+  end
+
+  subgraph 下游
+  D1[用户]
+  D2[客户]
+  end
+
+  U1 --> M1
+  U2 --> M1
+  M1 --> D1
+  M1 --> D2
+  M2 --> D1
+  M2 --> D2
+\`\`\``,
+    },
+    {
+      id: 'quality-assessment',
+      title: '报告质量评估',
+      required: false,
+      order: 11,
+      template: `## 10. 报告质量评估
+
+### 10.1 质量评分
+
+| 评估维度 | 得分 | 说明 |
+|---------|-----|------|
+| 数据完整度 | {dataCompletenessScore}/100 | 基于收集到的数据量 |
+| 数据来源可信度 | {sourceCredibilityScore}/100 | 基于数据来源的可靠性 |
+| 可视化覆盖率 | {visualizationCoverageScore}/100 | 基于图表类型覆盖率 |
+| **总体质量** | **{overallQualityScore}/100** | 综合评分 |
+
+### 10.2 数据缺口
+
+{dataGaps}
+
+### 10.3 改进建议
+
+{qualityRecommendations}`,
     },
     {
       id: 'sources',
       title: '数据来源说明',
       required: true,
-      order: 10,
-      template: `## 9. 数据来源说明
+      order: 12,
+      template: `## 11. 数据来源说明
 
 本报告数据来源于以下渠道：
 
 {sourceList}
 
 ### 数据收集时间
+
 - 调研时间: {generatedAt}
 
 ### 方法论
+
 本报告采用以下调研方法：
-1. **信息收集**：通过多渠道收集产品相关信息
+
+1. **信息收集**：通过多渠道收集产品相关信息（{dataSources}）
 2. **数据分析**：使用 AI 进行功能、竞品、市场深度分析
-3. **洞察生成**：基于数据分析生成战略洞察和建议
-4. **可视化呈现**：通过 Mermaid 图表展示分析结果
+3. **定量分析**：基于数据模型进行市场规模估算和预测
+4. **洞察生成**：基于数据分析生成战略洞察和建议
+5. **可视化呈现**：通过 Mermaid 图表展示分析结果
+
+### 数据可信度说明
+
+- **Primary（主要来源）**：直接引用的权威数据源（艾瑞、QuestMobile等）
+- **Secondary（次要来源）**：公开报道、行业分析等
+- **Estimated（估算数据）**：基于模型推算的数据
+- **Unverified（未验证）**：来源不明确的数据
 
 ### 分析置信度说明
+
 - 置信度 {confidenceScore}%：基于数据完整性和来源可靠性计算
 - 数据缺口：{dataGaps}`,
     },
@@ -316,9 +495,13 @@ export const REPORT_TEMPLATE: ReportTemplate = {
     { id: 'feature-frequency', type: 'pie', title: '功能频率分布', required: true },
     { id: 'competitor-mindmap', type: 'mindmap', title: '竞品思维导图', required: false },
     { id: 'swot-mindmap', type: 'mindmap', title: 'SWOT思维导图', required: true },
+    { id: 'market-size-trend', type: 'xychart', title: '市场规模趋势图', required: true },
+    { id: 'market-share', type: 'pie', title: '市场份额饼图', required: true },
+    { id: 'competitor-radar', type: 'radar', title: '竞品雷达图', required: false },
+    { id: 'roadmap-gantt', type: 'gantt', title: '实施路线图', required: false },
   ],
   metadata: {
-    templateVersion: '2.0.0',
+    templateVersion: '3.0.0',
     generatedAt: new Date().toISOString(),
   },
 };
@@ -332,7 +515,7 @@ export function generateReportContent(
   searchResultCount: number,
   extractionCount: number,
   analysis: {
-    features: Array<{ name: string; count: number; description: string }>;
+    features: Array<{ name: string; count: number; sources?: string[]; description: string }>;
     competitors: Array<{ name: string; industry: string; features: string[]; description: string; marketPosition: string }>;
     swot: {
       strengths: string[];
@@ -347,6 +530,53 @@ export function generateReportContent(
       trends: string[];
       opportunities: string[];
       challenges: string[];
+      marketSizeRange?: { min: string; base: string; max: string; currency: string };
+      growthRateHistorical?: Array<{ year: string; rate: string; source: string }>;
+      forecastYears?: Array<{ year: string; projectedSize: string; projectedRate: string; methodology: string }>;
+      dataSource?: { primary: string; secondary: string[]; lastUpdated: string };
+      confidenceLevel?: 'High' | 'Medium' | 'Low';
+      marketDrivers?: Array<{ factor: string; impact: 'High' | 'Medium' | 'Low'; description: string }>;
+      marketConstraints?: Array<{ factor: string; impact: 'High' | 'Medium' | 'Low'; description: string }>;
+    };
+    competitorQuantitative?: {
+      marketShare?: Array<{ competitor: string; share: number; yoyGrowth?: string; period?: string; source?: string }>;
+      ltvCacRatio?: Array<{ competitor: string; ltv: string; cac: string; ratio: string; health: string }>;
+      revenueMetrics?: Array<{ competitor: string; revenue: string; revenueGrowthRate: string }>;
+    };
+    businessModel?: {
+      pricingModel?: {
+        type: string;
+        tiers?: Array<{ name: string; price: string; features: string }>;
+        regionalVariations?: string;
+      };
+      unitEconomics?: {
+        breakEvenAnalysis?: { timeToBreakEven: string; revenueNeeded: string };
+        contributionMargin?: number;
+        scalabilityAssessment: string;
+      };
+      monetizationEfficiency?: {
+        freeToPaidConversion?: number;
+        arppu?: string;
+        rpDau?: string;
+      };
+      commercialMaturity?: {
+        rating: 'Early Stage' | 'Maturing' | 'Mature';
+        assessment: string;
+        keyMetrics: string[];
+      };
+    };
+    userResearch?: {
+      userPersonas?: Array<{
+        name: string;
+        demographics: { ageRange: string; genderRatio: string; geographicDistribution: string; incomeLevel: string };
+        behavioral: { usageFrequency: string; preferredFeatures: string[]; paymentWillingness: string };
+        source: string;
+      }>;
+      sampleSize?: { total: number; targetPopulation: string; confidenceLevel: number; marginOfError: number };
+      researchMethodology?: string;
+      penetrationRate?: { overall: number; bySegment: Array<{ segment: string; rate: number }> };
+      userSatisfaction?: { nps?: number; satisfactionScore: number; keyFeedback: string[] };
+      adoptionTrends?: Array<{ phase: string; percentage: number; description: string }>;
     };
     techAnalysis?: {
       architecture: string[];
@@ -356,6 +586,49 @@ export function generateReportContent(
     };
     confidenceScore: number;
     dataGaps: string[];
+    qualityAssessment?: {
+      dataCompletenessScore: number;
+      sourceCredibilityScore: number;
+      visualizationCoverageScore: number;
+      overallQualityScore: number;
+      dataGaps: string[];
+      recommendations: string[];
+    };
+    roadmap?: {
+      shortTerm: Array<{
+        specific: string;
+        measurable: { kpis: Array<{ name: string; target: string; current: string; unit: string }> };
+        achievable: { feasibility: string; rationale: string };
+        relevant: { relevanceScore: number; businessImpact: string };
+        timeBound: {
+          deadline: string;
+          milestones: Array<{ name: string; targetDate: string; successCriteria: string }>;
+        };
+        resourceRequirements: { budget: string; teamSize: string };
+      }>;
+      mediumTerm: Array<{
+        specific: string;
+        measurable: { kpis: Array<{ name: string; target: string; current: string; unit: string }> };
+        achievable: { feasibility: string; rationale: string };
+        relevant: { relevanceScore: number; businessImpact: string };
+        timeBound: {
+          deadline: string;
+          milestones: Array<{ name: string; targetDate: string; successCriteria: string }>;
+        };
+        resourceRequirements: { budget: string; teamSize: string };
+      }>;
+      longTerm: Array<{
+        specific: string;
+        measurable: { kpis: Array<{ name: string; target: string; current: string; unit: string }> };
+        achievable: { feasibility: string; rationale: string };
+        relevant: { relevanceScore: number; businessImpact: string };
+        timeBound: {
+          deadline: string;
+          milestones: Array<{ name: string; targetDate: string; successCriteria: string }>;
+        };
+        resourceRequirements: { budget: string; teamSize: string };
+      }>;
+    };
   },
   dataSources: string[]
 ): string {
@@ -388,7 +661,7 @@ interface ReportRenderData {
   searchResultCount: number;
   extractionCount: number;
   analysis: {
-    features: Array<{ name: string; count: number; description: string }>;
+    features: Array<{ name: string; count: number; sources?: string[]; description: string }>;
     competitors: Array<{ name: string; industry: string; features: string[]; description: string; marketPosition: string }>;
     swot: {
       strengths: string[];
@@ -403,6 +676,58 @@ interface ReportRenderData {
       trends: string[];
       opportunities: string[];
       challenges: string[];
+      // 新增定量数据字段
+      marketSizeRange?: {
+        min: string;
+        base: string;
+        max: string;
+        currency: string;
+      };
+      growthRateHistorical?: Array<{ year: string; rate: string; source: string }>;
+      forecastYears?: Array<{ year: string; projectedSize: string; projectedRate: string; methodology: string }>;
+      dataSource?: { primary: string; secondary: string[]; lastUpdated: string };
+      confidenceLevel?: 'High' | 'Medium' | 'Low';
+      marketDrivers?: Array<{ factor: string; impact: 'High' | 'Medium' | 'Low'; description: string }>;
+      marketConstraints?: Array<{ factor: string; impact: 'High' | 'Medium' | 'Low'; description: string }>;
+    };
+    competitorQuantitative?: {
+      marketShare?: Array<{ competitor: string; share: number; yoyGrowth?: string }>;
+      ltvCacRatio?: Array<{ competitor: string; ltv: string; cac: string; ratio: string; health: string }>;
+    };
+    businessModel?: {
+      pricingModel?: {
+        type: string;
+        tiers?: Array<{ name: string; price: string; features: string }>;
+        regionalVariations?: string;
+      };
+      unitEconomics?: {
+        breakEvenAnalysis?: { timeToBreakEven: string; revenueNeeded: string };
+        contributionMargin?: number;
+        scalabilityAssessment: string;
+      };
+      monetizationEfficiency?: {
+        freeToPaidConversion?: number;
+        arppu?: string;
+        rpDau?: string;
+      };
+      commercialMaturity?: {
+        rating: 'Early Stage' | 'Maturing' | 'Mature';
+        assessment: string;
+        keyMetrics: string[];
+      };
+    };
+    userResearch?: {
+      researchMethodology?: string;
+      sampleSize?: { total: number; targetPopulation: string; confidenceLevel: number; marginOfError: number };
+      userPersonas?: Array<{
+        name: string;
+        demographics: { ageRange: string; genderRatio: string; geographicDistribution: string; incomeLevel: string };
+        behavioral: { usageFrequency: string; preferredFeatures: string[]; paymentWillingness: string };
+        source: string;
+      }>;
+      penetrationRate?: { overall: number; bySegment: Array<{ segment: string; rate: number }> };
+      userSatisfaction?: { nps?: number; satisfactionScore: number; keyFeedback: string[] };
+      adoptionTrends?: Array<{ phase: string; percentage: number; description: string }>;
     };
     techAnalysis?: {
       architecture: string[];
@@ -412,6 +737,50 @@ interface ReportRenderData {
     };
     confidenceScore: number;
     dataGaps: string[];
+    qualityAssessment?: {
+      dataCompletenessScore: number;
+      sourceCredibilityScore: number;
+      visualizationCoverageScore: number;
+      overallQualityScore: number;
+      dataGaps: string[];
+      recommendations: string[];
+    };
+    roadmap?: {
+      shortTerm: Array<{
+        specific: string;
+        measurable: { kpis: Array<{ name: string; target: string; current: string; unit: string }> };
+        achievable: { feasibility: string; rationale: string };
+        relevant: { relevanceScore: number; businessImpact: string };
+        timeBound: {
+          deadline: string;
+          milestones: Array<{ name: string; targetDate: string; successCriteria: string }>;
+        };
+        resourceRequirements: { budget: string; teamSize: string };
+      }>;
+      // 使用与 shortTerm 相同的类型定义
+      mediumTerm: Array<{
+        specific: string;
+        measurable: { kpis: Array<{ name: string; target: string; current: string; unit: string }> };
+        achievable: { feasibility: string; rationale: string };
+        relevant: { relevanceScore: number; businessImpact: string };
+        timeBound: {
+          deadline: string;
+          milestones: Array<{ name: string; targetDate: string; successCriteria: string }>;
+        };
+        resourceRequirements: { budget: string; teamSize: string };
+      }>;
+      longTerm: Array<{
+        specific: string;
+        measurable: { kpis: Array<{ name: string; target: string; current: string; unit: string }> };
+        achievable: { feasibility: string; rationale: string };
+        relevant: { relevanceScore: number; businessImpact: string };
+        timeBound: {
+          deadline: string;
+          milestones: Array<{ name: string; targetDate: string; successCriteria: string }>;
+        };
+        resourceRequirements: { budget: string; teamSize: string };
+      }>;
+    };
   };
   dataSources: string;
 }
@@ -512,6 +881,126 @@ function renderSection(
     content = content.replace('{shortTermRecommendations}', renderShortTermRecommendations(analysis));
     content = content.replace('{mediumTermRecommendations}', renderMediumTermRecommendations(analysis));
     content = content.replace('{longTermRecommendations}', renderLongTermRecommendations(analysis));
+  }
+
+  // 特殊处理市场章节 - 新增定量数据
+  if (section.id === 'market') {
+    // 原有占位符
+    content = content.replace('{marketSize}', analysis.marketData.marketSize || '待分析');
+    content = content.replace('{growthRate}', analysis.marketData.growthRate || '待分析');
+    content = content.replace('{keyPlayers}', analysis.marketData.keyPlayers.join(', ') || '待分析');
+    content = content.replace('{marketTrends}', renderList(analysis.marketData.trends));
+    content = content.replace('{marketOpportunities}', renderList(analysis.marketData.opportunities));
+    content = content.replace('{marketChallenges}', renderList(analysis.marketData.challenges));
+
+    // 新增定量数据占位符
+    const md = analysis.marketData;
+    if (md.marketSizeRange) {
+      content = content.replace('{marketSizeRange}', `${md.marketSizeRange.currency} ${md.marketSizeRange.min} - ${md.marketSizeRange.max}`);
+    } else {
+      content = content.replace('{marketSizeRange}', '暂无数据');
+    }
+    content = content.replace('{confidenceLevel}', md.confidenceLevel || 'Medium');
+    content = content.replace('{dataSource}', md.dataSource?.primary || '基于网络调研估算');
+
+    // 历史增长率表格
+    if (md.growthRateHistorical && md.growthRateHistorical.length > 0) {
+      const historyRows = md.growthRateHistorical.map(h => `| ${h.year} | ${h.rate} | ${h.source || '-'} |`).join('\n');
+      content = content.replace('{marketGrowthHistory}', `| 年份 | 增长率 | 数据来源 |\n|-----|-------|---------|\n${historyRows}`);
+    } else {
+      content = content.replace('{marketGrowthHistory}', '暂无历史数据');
+    }
+
+    // 市场驱动因素
+    if (md.marketDrivers && md.marketDrivers.length > 0) {
+      const drivers = md.marketDrivers.map(d => `- **${d.factor}** (影响: ${d.impact}): ${d.description}`).join('\n');
+      content = content.replace('{marketDrivers}', drivers);
+    } else {
+      content = content.replace('{marketDrivers}', '暂无数据');
+    }
+
+    // 市场制约因素
+    if (md.marketConstraints && md.marketConstraints.length > 0) {
+      const constraints = md.marketConstraints.map(c => `- **${c.factor}** (影响: ${c.impact}): ${c.description}`).join('\n');
+      content = content.replace('{marketConstraints}', constraints);
+    } else {
+      content = content.replace('{marketConstraints}', '暂无数据');
+    }
+
+    // 市场预测
+    if (md.forecastYears && md.forecastYears.length > 0) {
+      content = content.replace('{forecastYears}', String(md.forecastYears.length));
+      const forecastRows = md.forecastYears.map(f => `| ${f.year} | ${f.projectedSize} | ${f.projectedRate} | ${f.methodology} |`).join('\n');
+      content = content.replace('{marketForecasts}', `| 年份 | 预测规模 | 预测增长率 | 预测方法 |\n|-----|---------|-----------|---------|\n${forecastRows}`);
+    } else {
+      content = content.replace('{forecastYears}', '暂无');
+      content = content.replace('{marketForecasts}', '暂无预测数据');
+    }
+  }
+
+  // 特殊处理商业模式章节
+  if (section.id === 'business-model') {
+    const bm = analysis.businessModel || {};
+    content = content.replace('{pricingModelType}', bm.pricingModel?.type || '待分析');
+    content = content.replace('{pricingTiers}', renderPricingTiers(bm.pricingModel?.tiers));
+    content = content.replace('{contributionMargin}', String(bm.unitEconomics?.contributionMargin || 0));
+    content = content.replace('{breakEvenTime}', bm.unitEconomics?.breakEvenAnalysis?.timeToBreakEven || '未知');
+    content = content.replace('{conversionRate}', String(bm.monetizationEfficiency?.freeToPaidConversion ? (bm.monetizationEfficiency.freeToPaidConversion * 100).toFixed(1) : '0'));
+    content = content.replace('{arppu}', bm.monetizationEfficiency?.arppu || '未知');
+    content = content.replace('{marginAssessment}', (bm.unitEconomics?.contributionMargin || 0) > 70 ? '优秀' : (bm.unitEconomics?.contributionMargin || 0) > 50 ? '良好' : '待改进');
+    content = content.replace('{conversionAssessment}', (bm.monetizationEfficiency?.freeToPaidConversion || 0) > 0.05 ? '优秀' : (bm.monetizationEfficiency?.freeToPaidConversion || 0) > 0.02 ? '良好' : '待改进');
+    content = content.replace('{arppuAssessment}', '-');
+    content = content.replace('{commercialMaturityRating}', bm.commercialMaturity?.rating || '待评估');
+    content = content.replace('{commercialMaturityAssessment}', bm.commercialMaturity?.assessment || '暂无评估');
+    content = content.replace('{mrr}', '-');
+    content = content.replace('{ltv}', '-');
+    content = content.replace('{cac}', '-');
+    content = content.replace('{churnRate}', '-');
+    content = content.replace('{nps}', String(analysis.userResearch?.userSatisfaction?.nps || 0));
+  }
+
+  // 特殊处理用户研究章节
+  if (section.id === 'user-research') {
+    const ur = analysis.userResearch || {};
+    content = content.replace('{researchMethodology}', ur.researchMethodology || '基于公开数据推断');
+    content = content.replace('{sampleSize}', ur.sampleSize ? String(ur.sampleSize.total) : '基于网络数据估算');
+    content = content.replace('{confidenceLevel}', ur.sampleSize ? String(ur.sampleSize.confidenceLevel) : '95');
+    content = content.replace('{marginOfError}', ur.sampleSize ? String(ur.sampleSize.marginOfError) : '5');
+    content = content.replace('{userPersonas}', renderUserPersonas(ur.userPersonas));
+    content = content.replace('{penetrationRates}', renderPenetrationRates(ur.penetrationRate));
+    content = content.replace('{npsScore}', String(ur.userSatisfaction?.nps || 0));
+    content = content.replace('{satisfactionScore}', String(ur.userSatisfaction?.satisfactionScore || 0));
+    content = content.replace('{keyFeedback}', (ur.userSatisfaction?.keyFeedback || []).join('; ') || '暂无反馈数据');
+    content = content.replace('{adoptionTrends}', renderAdoptionTrends(ur.adoptionTrends));
+  }
+
+  // 特殊处理数据可视化章节
+  if (section.id === 'data-visualization') {
+    // 产业链关系图数据
+    content = content.replace('{industryChainUpstream}', '原材料、技术');
+    content = content.replace('{industryChainMidstream}', '产品开发、服务提供');
+    content = content.replace('{industryChainDownstream}', '用户、客户');
+    // 用户细分热力图
+    content = content.replace('{userSegmentationHeatmap}', renderUserSegmentationHeatmap());
+  }
+
+  // 特殊处理质量评估章节
+  if (section.id === 'quality-assessment') {
+    const qa = analysis.qualityAssessment;
+    if (qa) {
+      content = content.replace('{dataCompletenessScore}', String(qa.dataCompletenessScore));
+      content = content.replace('{sourceCredibilityScore}', String(qa.sourceCredibilityScore));
+      content = content.replace('{visualizationCoverageScore}', String(qa.visualizationCoverageScore));
+      content = content.replace('{overallQualityScore}', String(qa.overallQualityScore));
+      content = content.replace('{qualityRecommendations}', qa.recommendations.map(r => `- ${r}`).join('\n') || '暂无建议');
+    } else {
+      content = content.replace('{dataCompletenessScore}', '0');
+      content = content.replace('{sourceCredibilityScore}', '0');
+      content = content.replace('{visualizationCoverageScore}', '0');
+      content = content.replace('{overallQualityScore}', '0');
+      content = content.replace('{qualityRecommendations}', '暂无评估数据');
+    }
+    content = content.replace('{dataGaps}', (analysis.dataGaps || []).length > 0 ? analysis.dataGaps.join('\n') : '无明显数据缺口');
   }
 
   // 特殊处理来源章节
@@ -877,6 +1366,61 @@ function renderLongTermRecommendations(analysis: ReportRenderData['analysis']): 
   recommendations.push('5. **国际化**：探索海外市场机会');
 
   return recommendations.length > 0 ? recommendations.join('\n') : '暂无长期建议';
+}
+
+/**
+ * 渲染定价套餐表格
+ */
+function renderPricingTiers(tiers: Array<{ name: string; price: string; features: string }> | undefined): string {
+  if (!tiers || tiers.length === 0) return '| 暂无定价信息 | - | - |';
+  return tiers.map(t => `| ${t.name} | ${t.price} | ${t.features || '-'} |`).join('\n');
+}
+
+/**
+ * 渲染用户画像
+ */
+function renderUserPersonas(personas: Array<{
+  name: string;
+  demographics: { ageRange: string; genderRatio: string; geographicDistribution: string; incomeLevel: string };
+  behavioral: { usageFrequency: string; preferredFeatures: string[]; paymentWillingness: string };
+  source: string;
+}> | undefined): string {
+  if (!personas || personas.length === 0) return '暂无用户画像数据';
+  return personas.map(p => `### ${p.name}
+
+- **人口统计特征**：${p.demographics.ageRange} | ${p.demographics.genderRatio} | ${p.demographics.geographicDistribution} | ${p.demographics.incomeLevel}
+- **行为特征**：${p.behavioral.usageFrequency} | 偏好: ${p.behavioral.preferredFeatures.join('、')} | 付费意愿: ${p.behavioral.paymentWillingness}
+- **数据来源**：${p.source}`).join('\n\n');
+}
+
+/**
+ * 渲染渗透率表格
+ */
+function renderPenetrationRates(rate: { overall: number; bySegment: Array<{ segment: string; rate: number }> } | undefined): string {
+  if (!rate) return '| 用户群体 | 渗透率 |暂无数据';
+  return rate.bySegment.map(s => `| ${s.segment} | ${s.rate}% |`).join('\n');
+}
+
+/**
+ * 渲染用户采纳趋势
+ */
+function renderAdoptionTrends(trends: Array<{ phase: string; percentage: number; description: string }> | undefined): string {
+  if (!trends || trends.length === 0) return '| 阶段 | 用户占比 | 描述 |\n|-----|---------|-----|\n| 探索期 | 5% | 早期采用者 |';
+  return trends.map(t => `| ${t.phase} | ${t.percentage}% | ${t.description} |`).join('\n');
+}
+
+/**
+ * 渲染用户细分热力图
+ */
+function renderUserSegmentationHeatmap(): string {
+  return `
+| 用户群体 | 功能A | 功能B | 功能C | 功能D |
+|---------|------|------|------|------|
+| 青少年 | 🟢 高 | 🟡 中 | 🔴 低 | 🟡 中 |
+| 职场人士 | 🟡 中 | 🟢 高 | 🟡 中 | 🟢 高 |
+| 退休人群 | 🔴 低 | 🟡 中 | 🟢 高 | 🟡 中 |
+
+**说明**：🟢 高 (70-100%) | 🟡 中 (40-69%) | 🟠 中低 (20-39%) | 🔴 低 (0-19%)`;
 }
 
 /**

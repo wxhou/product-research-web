@@ -28,6 +28,18 @@ export type AgentName = 'planner' | 'searcher' | 'extractor' | 'analyzer' | 'rep
 /** 数据源类型 - 复用 datasources 定义 */
 export type DataSourceType = BaseDataSourceType;
 
+/** 数据源可信度级别 */
+export type DataSourceCredibility = 'Primary' | 'Secondary' | 'Estimated' | 'Unverified';
+
+/** 数据源信息 */
+export interface DataSourceInfo {
+  type: DataSourceType;
+  name: string;
+  credibility: DataSourceCredibility;
+  lastAccessed: string;
+  recordCount: number;
+}
+
 // ============================================================
 // 任务配置
 // ============================================================
@@ -145,14 +157,228 @@ export interface SWOTAnalysis {
   threats: string[];
 }
 
-/** 市场数据 */
+/** 市场数据 - 增强版 */
 export interface MarketData {
+  // 原有字段
   marketSize: string;
   growthRate: string;
   keyPlayers: string[];
   trends: string[];
   opportunities: string[];
   challenges: string[];
+  // 新增：定量数据字段
+  marketSizeRange?: {
+    min: string; // 最小市场规模
+    base: string; // 基准市场规模
+    max: string; // 最大市场规模
+    currency: string; // 货币单位
+  };
+  growthRateHistorical?: Array<{
+    year: string;
+    rate: string;
+    source: string;
+  }>;
+  forecastYears?: Array<{
+    year: string;
+    projectedSize: string;
+    projectedRate: string;
+    methodology: string;
+  }>;
+  dataSource?: {
+    primary: string;
+    secondary: string[];
+    lastUpdated: string;
+  };
+  confidenceLevel?: 'High' | 'Medium' | 'Low';
+  marketDrivers?: Array<{
+    factor: string;
+    impact: 'High' | 'Medium' | 'Low';
+    description: string;
+  }>;
+  marketConstraints?: Array<{
+    factor: string;
+    impact: 'High' | 'Medium' | 'Low';
+    description: string;
+  }>;
+}
+
+/** 用户研究数据 - 新增 */
+export interface UserResearchData {
+  userPersonas?: Array<{
+    name: string;
+    demographics: {
+      ageRange: string;
+      genderRatio: string;
+      geographicDistribution: string;
+      incomeLevel: string;
+    };
+    behavioral: {
+      usageFrequency: string;
+      preferredFeatures: string[];
+      paymentWillingness: string;
+    };
+    source: string;
+  }>;
+  sampleSize?: {
+    total: number;
+    targetPopulation: string;
+    confidenceLevel: number; // e.g., 95
+    marginOfError: number; // e.g., 3
+  };
+  researchMethodology?: string; // e.g., '在线问卷', '电话访谈', '焦点小组'
+  penetrationRate?: {
+    overall: number;
+    bySegment: Array<{
+      segment: string;
+      rate: number;
+    }>;
+  };
+  userSatisfaction?: {
+    nps?: number; // Net Promoter Score
+    satisfactionScore: number; // 1-10
+    keyFeedback: string[];
+  };
+  adoptionTrends?: Array<{
+    phase: string; // 'early adopters', 'early majority', etc.
+    percentage: number;
+    description: string;
+  }>;
+}
+
+/** 竞品定量分析 - 新增 */
+export interface CompetitorQuantitative {
+  marketShare?: Array<{
+    competitor: string;
+    share: number; // percentage
+    period: string;
+    source: string;
+  }>;
+  revenueMetrics?: Array<{
+    competitor: string;
+    revenue: string;
+    revenueGrowthRate: string;
+    period: string;
+    currency: string;
+    source: string;
+  }>;
+  arpuMetrics?: Array<{
+    competitor: string;
+    arpu: string;
+    currency: string;
+    period: string;
+  }>;
+  cacMetrics?: Array<{
+    competitor: string;
+    cac: string;
+    currency: string;
+    period: string;
+  }>;
+  ltvMetrics?: Array<{
+    competitor: string;
+    ltv: string;
+    currency: string;
+    calculationMethod: string;
+  }>;
+  ltvCacRatio?: Array<{
+    competitor: string;
+    ratio: number;
+    assessment: string; // 'Healthy', 'Needs Improvement', etc.
+  }>;
+}
+
+/** 商业模式分析 - 新增 */
+export interface BusinessModelAnalysis {
+  pricingModel?: {
+    type: string; // 'subscription', 'freemium', 'one-time', 'usage-based'
+    tiers?: Array<{
+      name: string;
+      price: string;
+      features: string[];
+    }>;
+    regionalVariations?: string;
+  };
+  unitEconomics?: {
+    breakEvenAnalysis?: {
+      timeToBreakEven: string;
+      revenueNeeded: string;
+    };
+    contributionMargin?: number;
+    scalabilityAssessment: string;
+  };
+  monetizationEfficiency?: {
+    freeToPaidConversion?: number;
+    arppu?: string; // Average Revenue Per Paying User
+    rpDau?: string; // Revenue Per Daily Active User
+  };
+  commercialMaturity?: {
+    rating: 'Early Stage' | 'Maturing' | 'Mature';
+    assessment: string;
+    keyMetrics: string[];
+  };
+}
+
+/** 战略建议 - 新增 */
+export interface StrategicRecommendation {
+  specific?: string; // 具体描述
+  measurable?: {
+    kpis: Array<{
+      name: string;
+      target: string;
+      current: string;
+      unit: string;
+    }>;
+  };
+  achievable?: {
+    feasibility: 'High' | 'Medium' | 'Low';
+    rationale: string;
+  };
+  relevant?: {
+    relevanceScore: number; // 1-10
+    businessImpact: string;
+  };
+  timeBound?: {
+    deadline: string;
+    milestones: Array<{
+      name: string;
+      targetDate: string;
+      successCriteria: string;
+    }>;
+  };
+  resourceRequirements?: {
+    budget?: string;
+    teamSize?: string;
+    technologyNeeds?: string[];
+  };
+  riskAssessment?: {
+    risks: Array<{
+      risk: string;
+      likelihood: 'High' | 'Medium' | 'Low';
+      impact: 'High' | 'Medium' | 'Low';
+      mitigation: string;
+    }>;
+  };
+  roiProjection?: {
+    expectedReturn: string;
+    paybackPeriod: string;
+    assumptions: string[];
+  };
+}
+
+/** 实施路线图 - 新增 */
+export interface ImplementationRoadmap {
+  shortTerm?: Array<StrategicRecommendation>; // 0-6 months
+  mediumTerm?: Array<StrategicRecommendation>; // 6-12 months
+  longTerm?: Array<StrategicRecommendation>; // 12+ months
+}
+
+/** 报告质量评估 - 新增 */
+export interface ReportQualityAssessment {
+  dataCompletenessScore: number; // 0-100
+  sourceCredibilityScore: number; // 0-100
+  visualizationCoverageScore: number; // 0-100
+  overallQualityScore: number; // 0-100
+  dataGaps: string[];
+  recommendations: string[];
 }
 
 /** 技术栈分析 */
@@ -191,6 +417,12 @@ export interface DetailedAnalysis {
   };
   confidenceScore: number;
   dataGaps: string[];
+  // 新增：定量分析模块
+  userResearch?: UserResearchData;
+  competitorQuantitative?: CompetitorQuantitative;
+  businessModel?: BusinessModelAnalysis;
+  roadmap?: ImplementationRoadmap;
+  qualityAssessment?: ReportQualityAssessment;
 }
 
 /** 分析结果 - 保持向后兼容 */
@@ -202,6 +434,12 @@ export interface AnalysisResult extends Partial<DetailedAnalysis> {
   techAnalysis?: TechStackAnalysis;
   confidenceScore: number;
   dataGaps: string[];
+  // 新增：定量分析模块（可选）
+  userResearch?: UserResearchData;
+  competitorQuantitative?: CompetitorQuantitative;
+  businessModel?: BusinessModelAnalysis;
+  roadmap?: ImplementationRoadmap;
+  qualityAssessment?: ReportQualityAssessment;
 }
 
 // ============================================================
@@ -217,10 +455,10 @@ export interface ReportSection {
   required: boolean;
 }
 
-/** Mermaid 图表配置 */
+/** Mermaid 图表配置 - 增强版 */
 export interface MermaidChart {
   id: string;
-  type: 'pie' | 'mindmap' | 'timeline' | 'radar' | 'graph' | 'quadrant' | 'journey' | 'stateDiagram';
+  type: 'pie' | 'mindmap' | 'timeline' | 'radar' | 'graph' | 'quadrant' | 'journey' | 'stateDiagram' | 'xychart' | 'gantt' | 'heatmap';
   title: string;
   code: string;
 }

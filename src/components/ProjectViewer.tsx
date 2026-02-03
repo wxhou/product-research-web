@@ -25,10 +25,12 @@ interface Report {
 
 interface SearchResult {
   id: string;
+  project_id?: string;
   source: string;
   title: string;
   url: string;
   content: string;
+  created_at?: string;
 }
 
 interface TaskStatus {

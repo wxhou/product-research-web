@@ -127,6 +127,33 @@ async function planResearch(
 }
 
 /**
+ * 从文本中提取平衡括号包裹的 JSON 对象
+ * 使用计数器确保正确匹配嵌套的括号
+ */
+function extractBalancedJson(text: string): string | null {
+  let startIdx = -1;
+  let braceCount = 0;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+
+    if (char === '{' && braceCount === 0) {
+      startIdx = i;
+      braceCount = 1;
+    } else if (char === '{' && braceCount > 0) {
+      braceCount++;
+    } else if (char === '}' && braceCount > 0) {
+      braceCount--;
+      if (braceCount === 0 && startIdx !== -1) {
+        return text.slice(startIdx, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * 使用 LLM 生成搜索计划
  */
 async function generateSearchPlan(
@@ -147,17 +174,60 @@ async function generateSearchPlan(
   const responseText = await generateText(enhancedPrompt);
 
   // 使用 jsonrepair 解析 JSON（支持 LLM 返回的各种格式）
-  let response: Record<string, unknown>;
-  try {
-    // 尝试提取 JSON 内容（支持 markdown 代码块）
-    const jsonContent = responseText
-      .match(/```json\s*([\s\S]*?)\s*```/)?.[1]
-      || responseText.match(/\{[\s\S]*\}/)?.[0]
-      || responseText;
+  let response: Record<string, unknown> = {};
+  let parseSuccess = false;
 
-    response = JSON.parse(jsonrepair(jsonContent));
-  } catch (parseError) {
-    throw new Error(`无法解析 LLM 响应为 JSON: ${(parseError as Error).message}`);
+  try {
+    // 策略1: 尝试直接解析（处理纯 JSON 响应）
+    response = JSON.parse(responseText);
+    parseSuccess = true;
+  } catch {
+    // 策略2: 尝试提取 ```json {...} ``` 格式（JSON 在同一行）
+    const jsonOnSameLine = responseText.match(/```json\s+\{[\s\S]*?\}\s*```/);
+    if (jsonOnSameLine) {
+      try {
+        const content = jsonOnSameLine[0].replace(/```json\s+/, '').replace(/\s*```$/, '');
+        response = JSON.parse(jsonrepair(content));
+        parseSuccess = true;
+      } catch {
+        // 继续尝试下一个策略
+      }
+    }
+
+    // 策略3: 尝试提取 ```json 代码块（非贪婪）
+    if (!parseSuccess) {
+      const codeBlockMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
+      if (codeBlockMatch && codeBlockMatch[1]) {
+        try {
+          response = JSON.parse(jsonrepair(codeBlockMatch[1]));
+          parseSuccess = true;
+        } catch {
+          // 继续尝试下一个策略
+        }
+      }
+    }
+
+    // 策略4: 使用平衡括号算法提取 JSON
+    if (!parseSuccess) {
+      const braceMatch = extractBalancedJson(responseText);
+      if (braceMatch) {
+        try {
+          response = JSON.parse(jsonrepair(braceMatch));
+          parseSuccess = true;
+        } catch {
+          // 继续尝试下一个策略
+        }
+      }
+    }
+
+    // 如果以上都失败，直接用 jsonrepair 处理
+    if (!parseSuccess) {
+      try {
+        response = JSON.parse(jsonrepair(responseText));
+      } catch (finalError) {
+        throw new Error(`无法解析 LLM 响应为 JSON: ${(finalError as Error).message}`);
+      }
+    }
   }
 
   // 验证响应

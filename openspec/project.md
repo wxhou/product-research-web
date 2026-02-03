@@ -2,33 +2,40 @@
 
 ## Purpose
 
-**Product Research Web** is a web application for automated product research and analysis. The system allows users to:
+**Product Research Web** is a Next.js-based AI-powered product research platform. The system allows users to:
 
 - Create research projects with titles, descriptions, and keywords
-- Perform automated web research using multiple data sources (RSS feeds, search engines, GitHub)
-- Generate comprehensive product analysis reports using LLM (Large Language Model) or rule-based analysis
+- Perform automated web research using multiple data sources (RSS feeds, search engines, GitHub, Reddit)
+- Execute AI-driven research workflows using a multi-agent architecture with LangGraph
+- Generate comprehensive product analysis reports with LLM-powered insights
 - Supports multiple LLM providers (OpenAI, Anthropic, DeepSeek, Google Gemini, Moonshot/Kimi)
 - Features a task queue system for background research processing
 - Includes authentication with user roles (admin/user)
 
 **Key Features:**
 - Project management (create, view, delete projects)
-- Research task execution with real-time progress tracking
+- Multi-agent research workflow (Planner → Searcher → Extractor → Analyzer → Reporter)
+- Real-time progress tracking with state persistence
 - Report generation with Mermaid charts (SWOT analysis, timelines, radar charts)
-- Data source management (RSS feeds, search engines, GitHub)
+- Data source management (RSS feeds, search engines, GitHub, Reddit, Brave Search)
 - LLM configuration with role-based model selection (analyzer, extractor, reporter)
+- Task cancellation and checkpoint recovery
+- File-based state storage for research progress
 
 ## Tech Stack
+
 - **Frontend Framework**: Next.js 16.1.4 with App Router (React 19.2.3)
 - **Language**: TypeScript 5.9.3
 - **Styling**: Tailwind CSS 4 with PostCSS
 - **Database**: SQLite (better-sqlite3 12.6.2)
-- **LLM Integration**: LangChain core, OpenAI SDK, multi-provider support
+- **LLM Integration**: LangChain core 1.1.17, LangGraph 1.1.2, OpenAI SDK
+- **State Management**: LangGraph StateGraph for workflow orchestration
 - **Testing**: Jest 30.2.0 with ts-jest
 - **Code Quality**: ESLint 9 with Next.js config
-- **Icons**: Lucide React
+- **Icons**: Lucide React 0.563.0
 - **Markdown Rendering**: react-markdown, remark-gfm, rehype-highlight
-- **Diagrams**: Mermaid.js
+- **Diagrams**: Mermaid.js 11.4.1
+- **MCP Integration**: @modelcontextprotocol/sdk 1.25.3 (for web content extraction)
 
 ## Project Conventions
 
@@ -56,11 +63,42 @@
 
 ### Architecture Patterns
 
-1. **API Routes**: Next.js App Router route handlers with RESTful endpoints returning `NextResponse.json()`
-2. **Database Layer**: SQLite with better-sqlite3, prepared statements, migration support
-3. **State Management**: React Context API (`AuthContext`, `ThemeContext`)
-4. **Task Queue**: Background job processing with concurrency limit (max 3 active tasks)
-5. **LLM Integration**: Multi-provider support with role-based model selection
+1. **Multi-Agent Research Architecture**: LangGraph StateGraph-based workflow orchestration
+   - **Supervisor Agent**: Routes tasks to specialized worker agents based on state
+   - **Worker Agents**: Planner, Searcher, Extractor, Analyzer, Reporter
+   - **Graph State**: Shared ResearchState with checkpoint persistence
+2. **API Routes**: Next.js App Router route handlers with RESTful endpoints returning `NextResponse.json()`
+3. **Database Layer**: SQLite with better-sqlite3, prepared statements, migration support
+4. **State Management**: React Context API (`AuthContext`, `ThemeContext`)
+5. **Task Queue**: Background job processing with concurrency limit (max 3 active tasks)
+6. **LLM Integration**: Multi-provider support with role-based model selection
+7. **File-Based Storage**: Research state persisted to Markdown files with Frontmatter
+
+**Research Agent Directory Structure:**
+```
+src/lib/research-agent/
+├── index.ts              # Main entry point
+├── service.ts            # API bridge layer
+├── state.ts              # ResearchState type definition
+├── types.ts              # Shared types (AgentName, etc.)
+├── supervisor/           # Supervisor agent with routing logic
+│   ├── index.ts
+│   └── prompts.ts
+├── workers/              # Specialized worker agents
+│   ├── planner/          # Research planning
+│   ├── searcher/         # Web search execution
+│   ├── extractor/        # Content extraction
+│   ├── analyzer/         # Data analysis
+│   └── reporter/         # Report generation
+├── graph/                # LangGraph workflow orchestration
+│   ├── builder.ts        # Graph construction
+│   ├── state-graph.ts    # StateGraph wrapper
+│   ├── checkpoint.ts     # Checkpoint persistence
+│   └── markdown-state.ts # Markdown state serialization
+├── progress/             # Progress tracking
+├── cancellation/         # Task cancellation
+└── backup/               # State backup/restore
+```
 
 **Directory Structure:**
 ```
@@ -77,10 +115,11 @@ src/
 ├── lib/                   # Core logic modules
 │   ├── __tests__/        # Unit tests
 │   ├── analysis/         # Search result analysis
-│   ├── datasources/      # Data source integrations
+│   ├── datasources/      # Data source integrations (RSS, search, GitHub, etc.)
 │   ├── db/               # Database schema and helpers
 │   ├── llm/              # LLM client and providers
-│   └── research-agent/   # Research workflow
+│   ├── file-storage/     # File-based state storage
+│   └── research-agent/   # Multi-agent research workflow
 └── middleware.ts          # Auth middleware
 ```
 
@@ -124,9 +163,11 @@ src/
 ## Domain Context
 
 - **Product Research**: Automated collection and analysis of product information from web sources
+- **Multi-Agent AI System**: LangGraph-based supervisor-worker architecture for research automation
 - **LLM Analysis**: Uses large language models for intelligent content analysis and report generation
-- **Research Workflow**: Multi-phase research process with progress tracking
+- **Research Workflow**: Multi-phase research process (Plan → Search → Extract → Analyze → Report)
 - **Report Generation**: Markdown reports with embedded Mermaid diagrams for visualizations
+- **State Persistence**: File-based checkpoint system with SHA-256 integrity verification
 
 ## Important Constraints
 
@@ -134,10 +175,13 @@ src/
 - **User Concurrency**: Max 3 concurrent research tasks per user
 - **Session-based Auth**: Cookie-based authentication (no JWT tokens stored)
 - **Server-side Processing**: LLM calls and research tasks execute server-side only
+- **File State Storage**: Research state saved to `task-data/{projectId}/state.md`
+- **Checkpoint Interval**: State backed up every 30 seconds during research execution
 
 ## External Dependencies
 
 - **LLM Providers**: OpenAI, Anthropic, DeepSeek, Google Gemini, Moonshot/Kimi, ModelScope
-- **Web Search APIs**: Google, Bing (via search engines)
-- **Data Sources**: RSS feeds, GitHub API
+- **Web Search APIs**: Brave Search (primary), DuckDuckGo, Bing
+- **Data Sources**: RSS feeds (Hacker News, TechCrunch, Product Hunt, etc.), GitHub API, Reddit
+- **MCP Server**: zcaceres/fetch-mcp for full-page content extraction (planned)
 - **Font**: Inter (Google Fonts via Next.js)

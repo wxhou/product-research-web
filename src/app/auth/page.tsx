@@ -37,15 +37,27 @@ export default function AuthPage() {
     setLoading(true);
 
     try {
-      // 如果需要密码，尝试管理员登录；否则普通用户进入
-      const success = showPassword && password
-        ? await login(username, password)
-        : await register(username);
-
-      if (!success) {
-        setError(showPassword && password ? '用户名或密码错误' : '操作失败，请重试');
+      // xadmin 必须输入密码才能登录
+      if (showPassword) {
+        if (!password) {
+          setError('请输入密码');
+          setLoading(false);
+          return;
+        }
+        const success = await login(username, password);
+        if (!success) {
+          setError('用户名或密码错误');
+        } else {
+          router.push('/');
+        }
       } else {
-        router.push('/');
+        // 普通用户直接注册/登录
+        const success = await register(username);
+        if (!success) {
+          setError('操作失败，请重试');
+        } else {
+          router.push('/');
+        }
       }
     } catch (err) {
       setError('操作失败，请重试');

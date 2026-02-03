@@ -128,7 +128,7 @@ async function executeReport(
       keywords,
       searchResults.length,
       state.extractedContent.length,
-      analysis,
+      analysis as any,
       sourceNames
     );
 
