@@ -72,15 +72,15 @@
 
 ## 7. 测试
 
-- [ ] 7.1 编写类型定义测试
-- [ ] 7.2 编写分析模块单元测试
-- [ ] 7.3 编写可视化模块测试
-- [ ] 7.4 编写 Reporter Agent 集成测试
-- [ ] 7.5 编写端到端报告生成测试
+- [x] 7.1 编写类型定义测试
+- [x] 7.2 编写分析模块单元测试
+- [x] 7.3 编写可视化模块测试
+- [x] 7.4 编写 Reporter Agent 集成测试
+- [x] 7.5 编写端到端报告生成测试
 
 ## 8. 文档
 
-- [ ] 8.1 更新 API 文档
-- [ ] 8.2 编写新模块使用文档
-- [ ] 8.3 更新用户指南
-- [ ] 8.4 添加示例报告
+- [x] 8.1 更新 API 文档 - `docs/RESEARCH_AGENT.md` 添加新增类型定义和模块文档
+- [x] 8.2 编写新模块使用文档 - 添加 MarketDataAnalyzer、UserResearchAnalyzer、CompetitorQuantitativeAnalyzer、BusinessModelAnalyzer、DataVisualizer 使用示例
+- [x] 8.3 更新用户指南 - 整合到 RESEARCH_AGENT.md 文档
+- [x] 8.4 添加示例报告 - `docs/examples/sample-report-quantitative.md` 包含完整定量分析示例

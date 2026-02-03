@@ -10,6 +10,9 @@ Research Agent 是一个基于 **Agentic RAG（代理增强检索生成）** 架
 - **混合提取策略**：优先使用 LLM 提取，兜底使用改进的正则提取
 - **数据质量评估**：自动评估数据完整性，决定是否需要更多搜索
 - **结构化输出**：生成包含引用、图表、数据质量评估的完整报告
+- **定量分析**：集成市场数据、用户研究、竞品定量、商业模式分析模块
+- **数据可视化**：支持 Mermaid 图表（饼图、折线图、甘特图、雷达图、热力图等）
+- **战略建议**：基于 SMART 原则生成可执行的战略建议
 
 ---
 
@@ -49,6 +52,42 @@ Research Agent 是一个基于 **Agentic RAG（代理增强检索生成）** 架
 ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
 │ DuckDuckGo│ │  GitHub  │ │   RSS    │ │  Brave   │ │  ...     │
 └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
+
+---
+
+## 定量分析架构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    定量分析层 (Quantitative Analysis)            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌────────────────┐│
+│  │  MarketData      │  │ UserResearch     │  │ Competitor     ││
+│  │  Analyzer        │  │ Analyzer         │  │ Quantitative   ││
+│  │                  │  │                  │  │ Analyzer       ││
+│  │  - 市场规模估算  │  │  - 用户画像生成  │  │  - 市场份额    ││
+│  │  - 增长趋势预测  │  │  - 渗透率分析    │  │  - LTV/CAC     ││
+│  │  - 市场细分      │  │  - NPS 分析      │  │  - 营收对比    ││
+│  └──────────────────┘  └──────────────────┘  └────────────────┘│
+│         │                    │                     │            │
+│         ▼                    ▼                     ▼            │
+│  ┌────────────────────────────────────────────────────────────┐│
+│  │              BusinessModelAnalyzer                         ││
+│  │  - 定价模式分析       - Unit Economics 计算                ││
+│  │  - 盈利模式分析       - 商业化成熟度评估                    ││
+│  └────────────────────────────────────────────────────────────┘│
+│                              │                                  │
+│                              ▼                                  │
+│  ┌────────────────────────────────────────────────────────────┐│
+│  │                   DataVisualizer                            ││
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐  ││
+│  │  │ 饼图      │ │ 折线图    │ │ 雷达图    │ │ 热力图/甘特图 │││
+│  │  │(市场份额) │ │(增长趋势) │ │(竞品对比) │ │(用户画像/路线图)││
+│  │  └──────────┘ └──────────┘ └──────────┘ └──────────────┘  ││
+│  └────────────────────────────────────────────────────────────┘│
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -536,6 +575,291 @@ runResearchAgent(
 
 ---
 
+## 新增类型定义
+
+### 市场数据 (MarketData)
+
+```typescript
+interface MarketData {
+  // 原有字段
+  marketSize: string;           // 市场规模
+  growthRate: string;           // 增长率
+  keyPlayers: string[];         // 主要玩家
+  trends: string[];             // 趋势
+  opportunities: string[];      // 机会
+  challenges: string[];         // 挑战
+
+  // 新增定量字段
+  marketSizeRange?: {           // 市场规模范围
+    min: string;
+    base: string;
+    max: string;
+    currency: string;
+  };
+  growthRateHistorical?: Array<{ // 历史增长率
+    year: string;
+    rate: string;
+    source: string;
+  }>;
+  forecastYears?: Array<{       // 预测年份
+    year: string;
+    projectedSize: string;
+    projectedRate: string;
+    methodology: string;
+  }>;
+  dataSource?: {                // 数据来源
+    primary: string;
+    secondary: string[];
+    lastUpdated: string;
+  };
+  confidenceLevel?: 'High' | 'Medium' | 'Low';
+  marketDrivers?: Array<{       // 市场驱动因素
+    factor: string;
+    impact: 'High' | 'Medium' | 'Low';
+    description: string;
+  }>;
+  marketConstraints?: Array<{   // 市场制约因素
+    factor: string;
+    impact: 'High' | 'Medium' | 'Low';
+    description: string;
+  }>;
+}
+```
+
+### 用户研究数据 (UserResearchData)
+
+```typescript
+interface UserResearchData {
+  userPersonas?: Array<{
+    name: string;
+    demographics: {
+      ageRange: string;
+      genderRatio: string;
+      geographicDistribution: string;
+      incomeLevel: string;
+    };
+    behavioral: {
+      usageFrequency: string;
+      preferredFeatures: string[];
+      paymentWillingness: string;
+    };
+  }>;
+  sampleSize?: {
+    total: number;
+    targetPopulation: string;
+    confidenceLevel: number;
+    marginOfError: number;
+  };
+  penetrationRate?: {
+    overall: number;
+    bySegment: Array<{ segment: string; rate: number }>;
+  };
+  userSatisfaction?: {
+    nps?: number;
+    satisfactionScore: number;
+    keyFeedback: string[];
+  };
+}
+```
+
+### 竞品定量分析 (CompetitorQuantitative)
+
+```typescript
+interface CompetitorQuantitative {
+  marketShare?: Array<{
+    competitor: string;
+    share: number;
+    period: string;
+    source: string;
+  }>;
+  revenueMetrics?: Array<{
+    competitor: string;
+    revenue: string;
+    revenueGrowthRate: string;
+    currency: string;
+  }>;
+  ltvCacRatio?: Array<{
+    competitor: string;
+    ratio: number;
+    assessment: string;
+  }>;
+}
+```
+
+### 商业模式分析 (BusinessModelAnalysis)
+
+```typescript
+interface BusinessModelAnalysis {
+  pricingModel?: {
+    type: 'subscription' | 'freemium' | 'one-time' | 'usage-based';
+    tiers?: Array<{
+      name: string;
+      price: string;
+      features: string[];
+    }>;
+  };
+  unitEconomics?: {
+    breakEvenAnalysis?: {
+      timeToBreakEven: string;
+      revenueNeeded: string;
+    };
+    contributionMargin?: number;
+    scalabilityAssessment: string;
+  };
+  monetizationEfficiency?: {
+    freeToPaidConversion?: number;
+    arppu?: string;
+    rpDau?: string;
+  };
+}
+```
+
+### 战略建议 (StrategicRecommendation)
+
+```typescript
+interface StrategicRecommendation {
+  specific?: string;
+  measurable?: {
+    kpis: Array<{
+      name: string;
+      target: string;
+      current: string;
+      unit: string;
+    }>;
+  };
+  achievable?: {
+    feasibility: 'High' | 'Medium' | 'Low';
+    rationale: string;
+  };
+  relevant?: {
+    relevanceScore: number;
+    businessImpact: string;
+  };
+  timeBound?: {
+    deadline: string;
+    milestones: Array<{
+      name: string;
+      targetDate: string;
+      successCriteria: string;
+    }>;
+  };
+}
+```
+
+### Mermaid 图表 (MermaidChart)
+
+```typescript
+interface MermaidChart {
+  id: string;
+  type: 'pie' | 'mindmap' | 'timeline' | 'radar' | 'graph' |
+        'quadrant' | 'journey' | 'stateDiagram' | 'xychart' | 'gantt' | 'heatmap';
+  title: string;
+  code: string;  // Mermaid 语法代码
+}
+```
+
+---
+
+## 新增分析模块
+
+### 1. 市场数据分析 (MarketDataAnalyzer)
+
+**功能**：
+- 市场规模估算（自上而下/自下而上）
+- 增长率趋势分析和预测
+- 市场驱动因素和制约因素分析
+- 市场规模细分（按产品类型、用户群体、地域）
+
+**使用示例**：
+```typescript
+import { analyzeMarketData } from '@/lib/research-agent/workers/analyzer';
+
+const marketAnalysis = await analyzeMarketData(searchResults, {
+  methodology: 'top-down', // 或 'bottom-up'
+  forecastYears: 3,
+});
+```
+
+### 2. 用户研究分析 (UserResearchAnalyzer)
+
+**功能**：
+- 用户画像生成和聚合
+- 用户规模和渗透率估算
+- 用户行为特征分析
+- 用户满意度和 NPS 分析
+
+**使用示例**：
+```typescript
+import { analyzeUserResearch } from '@/lib/research-agent/workers/analyzer';
+
+const userAnalysis = await analyzeUserResearch(searchResults, {
+  includePersonas: true,
+  calculatePenetration: true,
+});
+```
+
+### 3. 竞品定量分析 (CompetitorQuantitativeAnalyzer)
+
+**功能**：
+- 市场份额计算和对比
+- 营收规模和增速对比
+- ARPU/CAC/LTV 对比分析
+- 竞争格局矩阵分析
+
+**使用示例**：
+```typescript
+import { analyzeCompetitorQuant } from '@/lib/research-agent/workers/analyzer';
+
+const competitorAnalysis = await analyzeCompetitorQuant(searchResults, {
+  compareMetrics: ['marketShare', 'revenue', 'ltvCac'],
+});
+```
+
+### 4. 商业模式分析 (BusinessModelAnalyzer)
+
+**功能**：
+- 定价模式和收费策略分析
+- Unit Economics 计算和对比
+- 盈利模式和变现效率分析
+- 商业化成熟度评估模型
+
+**使用示例**：
+```typescript
+import { analyzeBusinessModel } from '@/lib/research-agent/workers/analyzer';
+
+const businessAnalysis = await analyzeBusinessModel(searchResults, {
+  analyzePricing: true,
+  calculateUnitEconomics: true,
+});
+```
+
+### 5. 数据可视化 (DataVisualizer)
+
+**支持的图表类型**：
+
+| 图表类型 | 用途 | 示例 |
+|---------|------|------|
+| pie | 市场份额分布 | `pie title 市场份额\n "A公司" : 35` |
+| xychart | 增长趋势 | `xychart-beta\n bar [10, 25, 40]` |
+| gantt | 产品路线图 | `gantt\n section 开发\n 功能开发 : 30d` |
+| radar | 竞品对比 | `radar\n title 能力对比` |
+| mindmap | 思维导图 | `mindmap\n root 调研结论` |
+| heatmap | 用户画像热力 | `xychart-beta` (用于热力数据) |
+
+**使用示例**：
+```typescript
+import { generateMarketShareChart, generateGrowthTrendChart } from '@/lib/research-agent/visualizer';
+
+const pieChart = generateMarketShareChart([
+  { label: '领导者', value: 40 },
+  { label: '挑战者', value: 25 },
+  { label: '跟随者', value: 20 },
+  { label: '其他', value: 15 },
+]);
+```
+
+---
+
 ## 扩展指南
 
 ### 添加新的数据源
@@ -555,3 +879,9 @@ runResearchAgent(
 1. 修改 `summarizeSingleResult` 中的 LLM 提示词
 2. 添加新的基础提取函数到 "改进版基础提取函数" 区域
 3. 在 `validateFeature` / `validateCompetitor` 中添加新的验证规则
+
+### 添加新的 Mermaid 图表类型
+
+1. 在 `MermaidChart.type` 中添加新类型
+2. 在 `DataVisualizer` 中实现对应的生成函数
+3. 在报告模板中调用新的图表生成函数

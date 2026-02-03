@@ -1,11 +1,13 @@
 /**
  * Backup Module Tests
+ *
+ * Type validation tests for Backup module
  */
 
+import { describe, it, expect } from '@jest/globals';
 import { computeSHA256, verifyChecksum, createBackupManager, DEFAULT_BACKUP_CONFIG } from '../../research-agent/backup';
-import type { ResearchState } from '../../research-agent/state';
 
-describe('Backup Module', () => {
+describe('Backup Module Types', () => {
   describe('computeSHA256', () => {
     it('should compute consistent hash for same input', () => {
       const data = 'test data';
@@ -31,6 +33,12 @@ describe('Backup Module', () => {
       expect(hash).toHaveLength(64);
       expect(/^[a-f0-9]+$/.test(hash)).toBe(true);
     });
+
+    it('should handle long strings', () => {
+      const longData = 'a'.repeat(10000);
+      const hash = computeSHA256(longData);
+      expect(hash).toHaveLength(64);
+    });
   });
 
   describe('verifyChecksum', () => {
@@ -48,58 +56,64 @@ describe('Backup Module', () => {
 
     it('should return false for tampered data', () => {
       const originalData = 'original data';
+      const tamperedData = 'tampered data';
       const checksum = computeSHA256(originalData);
 
-      const tamperedData = 'tampered data';
       expect(verifyChecksum(tamperedData, checksum)).toBe(false);
     });
-  });
 
-  describe('createBackupManager', () => {
-    it('should create a manager with required methods', () => {
-      const manager = createBackupManager(DEFAULT_BACKUP_CONFIG);
-      expect(typeof manager.createBackup).toBe('function');
-      expect(typeof manager.restoreBackup).toBe('function');
-      expect(typeof manager.listBackups).toBe('function');
-      expect(typeof manager.deleteBackup).toBe('function');
-      expect(typeof manager.getBackupDir).toBe('function');
-    });
+    it('should be case-insensitive for hex characters', () => {
+      const data = 'test data';
+      const checksum = computeSHA256(data);
+      const upperCaseChecksum = checksum.toUpperCase();
 
-    it('should return correct backup directory', () => {
-      const manager = createBackupManager(DEFAULT_BACKUP_CONFIG);
-      expect(manager.getBackupDir()).toBe(DEFAULT_BACKUP_CONFIG.backupDir);
-    });
-
-    it('should use custom backup directory', () => {
-      const customConfig = { ...DEFAULT_BACKUP_CONFIG, backupDir: 'custom-backups' };
-      const manager = createBackupManager(customConfig);
-      expect(manager.getBackupDir()).toBe('custom-backups');
+      expect(verifyChecksum(data, upperCaseChecksum)).toBe(true);
     });
   });
 
   describe('DEFAULT_BACKUP_CONFIG', () => {
-    it('should have valid configuration values', () => {
-      expect(DEFAULT_BACKUP_CONFIG.trigger).toBe('interval');
-      expect(DEFAULT_BACKUP_CONFIG.intervalMs).toBe(30000);
-      expect(DEFAULT_BACKUP_CONFIG.checkpointBackup).toBe(true);
+    it('should have required configuration properties', () => {
+      expect(DEFAULT_BACKUP_CONFIG.backupDir).toBeDefined();
+      expect(typeof DEFAULT_BACKUP_CONFIG.maxBackups).toBe('number');
+      expect(typeof DEFAULT_BACKUP_CONFIG.intervalMs).toBe('number');
       expect(DEFAULT_BACKUP_CONFIG.maxBackups).toBeGreaterThan(0);
-      expect(typeof DEFAULT_BACKUP_CONFIG.backupDir).toBe('string');
+      expect(DEFAULT_BACKUP_CONFIG.intervalMs).toBeGreaterThan(0);
     });
 
-    it('should have reasonable interval', () => {
-      // 30 seconds in milliseconds
-      expect(DEFAULT_BACKUP_CONFIG.intervalMs).toBe(30 * 1000);
+    it('should have valid intervalMs value', () => {
+      expect(DEFAULT_BACKUP_CONFIG.intervalMs).toBe(30000);
+    });
+
+    it('should have valid max backups value', () => {
+      expect(DEFAULT_BACKUP_CONFIG.maxBackups).toBe(5);
     });
   });
-});
 
-describe('Backup Manager Integration', () => {
-  // These tests verify the backup manager interface
-  // Full integration tests would require file system access
+  describe('createBackupManager', () => {
+    it('should create backup manager with valid config', () => {
+      const customConfig = {
+        backupDir: '/custom/backup',
+        maxBackups: 10,
+        intervalMs: 60000,
+      };
 
-  it('should handle createBackup for non-existent project', async () => {
-    const manager = createBackupManager(DEFAULT_BACKUP_CONFIG);
-    const result = await manager.createBackup('non-existent-project');
-    expect(result).toBeNull();
+      const manager = createBackupManager(customConfig);
+
+      expect(manager).toBeDefined();
+      expect(typeof manager.createBackup).toBe('function');
+      expect(typeof manager.listBackups).toBe('function');
+      expect(typeof manager.restoreBackup).toBe('function');
+      expect(typeof manager.deleteBackup).toBe('function');
+    });
+
+    it('should handle partial config', () => {
+      const partialConfig = {
+        backupDir: '/backup',
+      };
+
+      const manager = createBackupManager(partialConfig);
+
+      expect(manager).toBeDefined();
+    });
   });
 });

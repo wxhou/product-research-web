@@ -120,10 +120,11 @@ describe('Analysis Module', () => {
 
       // Check for required chart types
       const chartTypes = result.mermaidCharts.map(c => c.type);
-      expect(chartTypes).toContain('bar'); // Feature frequency
-      expect(chartTypes).toContain('quadrant'); // Opportunity quadrant
+      expect(chartTypes).toContain('pie'); // Feature frequency
       expect(chartTypes).toContain('timeline'); // Tech roadmap
       expect(chartTypes).toContain('mindmap'); // SWOT
+      expect(chartTypes).toContain('journey'); // User journey
+      expect(chartTypes).toContain('graph'); // Architecture diagram
     });
 
     it('should generate market data', () => {
@@ -209,15 +210,18 @@ describe('Analysis Module', () => {
       expect(report).toContain('# 工业物联网平台');
       expect(report).toContain('## 摘要');
       expect(report).toContain('## 1. 调研概览');
-      expect(report).toContain('## 功能频率分布');
-      expect(report).toContain('## 功能对比矩阵');
-      expect(report).toContain('## 2. SWOT 分析');
-      expect(report).toContain('## 3. 竞品详情');
-      expect(report).toContain('## 4. 市场数据');
-      expect(report).toContain('## 机会四象限');
-      expect(report).toContain('## 机会清单');
-      expect(report).toContain('## 技术路线演进');
-      expect(report).toContain('## 结论与建议');
+      expect(report).toContain('### 5.2 功能频率分布图');
+      expect(report).toContain('### 5.3 功能对比矩阵');
+      expect(report).toContain('## 7. SWOT 分析');
+      expect(report).toContain('## 4. 竞品分析');
+      expect(report).toContain('## 2. 市场背景分析');
+      expect(report).toContain('## 5. 功能分析');
+      expect(report).toContain('## 6. 技术分析');
+      expect(report).toContain('## 8. 商业模式分析');
+      expect(report).toContain('## 9. 市场机会分析');
+      expect(report).toContain('## 10. 技术路线演进');
+      expect(report).toContain('## 12. 战略建议');
+      expect(report).toContain('## 17. 调研产品详单');
     });
 
     it('should include project metadata', () => {
@@ -245,17 +249,17 @@ describe('Analysis Module', () => {
     it('should include SWOT sections', () => {
       const report = generateFullReport(mockProject, mockSearchResults, mockAnalysis);
 
-      expect(report).toContain('### 优势 (Strengths)');
-      expect(report).toContain('### 劣势 (Weaknesses)');
-      expect(report).toContain('### 机会 (Opportunities)');
-      expect(report).toContain('### 威胁 (Threats)');
+      expect(report).toContain('### 7.1 优势 (Strengths)');
+      expect(report).toContain('### 7.2 劣势 (Weaknesses)');
+      expect(report).toContain('### 7.3 机会 (Opportunities)');
+      expect(report).toContain('### 7.4 威胁 (Threats)');
     });
 
     it('should include competitor cards', () => {
       const report = generateFullReport(mockProject, mockSearchResults, mockAnalysis);
 
-      expect(report).toContain('### ThingWorx');
-      expect(report).toContain('**行业**: 制造业');
+      expect(report).toContain('#### 1. ThingWorx');
+      expect(report).toContain('**行业定位**: 制造业');
       expect(report).toContain('**核心功能**:');
     });
 
@@ -271,7 +275,7 @@ describe('Analysis Module', () => {
     it('should include search result citations', () => {
       const report = generateFullReport(mockProject, mockSearchResults, mockAnalysis);
 
-      expect(report).toContain('## 调研产品概览');
+      expect(report).toContain('## 17. 调研产品详单');
       expect(report).toContain('ThingWorx 工业物联网平台');
     });
 

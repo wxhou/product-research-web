@@ -42,3 +42,4 @@ next-env.d.ts
 
 # task data (persisted research data)
 task-data/
+data/research.db
