@@ -67,12 +67,26 @@
    - **Supervisor Agent**: Routes tasks to specialized worker agents based on state
    - **Worker Agents**: Planner, Searcher, Extractor, Analyzer, Reporter
    - **Graph State**: Shared ResearchState with checkpoint persistence
-2. **API Routes**: Next.js App Router route handlers with RESTful endpoints returning `NextResponse.json()`
-3. **Database Layer**: SQLite with better-sqlite3, prepared statements, migration support
-4. **State Management**: React Context API (`AuthContext`, `ThemeContext`)
-5. **Task Queue**: Background job processing with concurrency limit (max 3 active tasks)
-6. **LLM Integration**: Multi-provider support with role-based model selection
-7. **File-Based Storage**: Research state persisted to Markdown files with Frontmatter
+
+2. **Quantitative Analysis Pipeline** (最新增强)
+   - **MarketDataAnalyzer**: 市场规模估算、增长率趋势预测、市场细分
+   - **UserResearchAnalyzer**: 用户画像生成、渗透率分析、NPS分析
+   - **CompetitorQuantitativeAnalyzer**: 市场份额、LTV/CAC、营收对比
+   - **BusinessModelAnalyzer**: 定价模式、Unit Economics、商业化成熟度
+   - **DataVisualizer**: Mermaid图表生成（饼图、折线图、雷达图、甘特图、热力图）
+
+3. **Report Generation Engine**
+   - SMART原则战略建议生成
+   - 多章节结构模板（执行摘要、市场概览、用户研究、竞品分析、商业模式）
+   - Mermaid图表自动嵌入
+   - 数据质量评估与来源标注
+
+4. **API Routes**: Next.js App Router route handlers with RESTful endpoints returning `NextResponse.json()`
+5. **Database Layer**: SQLite with better-sqlite3, prepared statements, migration support
+6. **State Management**: React Context API (`AuthContext`, `ThemeContext`)
+7. **Task Queue**: Background job processing with concurrency limit (max 3 active tasks)
+8. **LLM Integration**: Multi-provider support with role-based model selection
+9. **File-Based Storage**: Research state persisted to Markdown files with Frontmatter
 
 **Research Agent Directory Structure:**
 ```
@@ -182,6 +196,34 @@ src/
 
 - **LLM Providers**: OpenAI, Anthropic, DeepSeek, Google Gemini, Moonshot/Kimi, ModelScope
 - **Web Search APIs**: Brave Search (primary), DuckDuckGo, Bing
-- **Data Sources**: RSS feeds (Hacker News, TechCrunch, Product Hunt, etc.), GitHub API, Reddit
-- **MCP Server**: zcaceres/fetch-mcp for full-page content extraction (planned)
+- **Data Sources**:
+  - RSS Feeds: Hacker News, TechCrunch, The Verge, Wired, Product Hunt, 36Kr, etc.
+  - GitHub API: Repository search and content extraction
+  - Reddit: Subreddit search and post extraction
+- **MCP Server**: zcaceres/fetch-mcp for full-page content extraction
 - **Font**: Inter (Google Fonts via Next.js)
+
+## OpenSpec Change Management
+
+This project uses OpenSpec for tracking architectural changes and proposals.
+
+### Change Categories
+- **feat**: New feature implementations
+- **refactor**: Architectural refactoring
+- **enhance**: Quality improvements and optimizations
+
+### Change Process
+1. Create proposal in `openspec/changes/{category}-{description}/`
+2. Define tasks in `tasks.md`
+3. Implement changes following the spec
+4. Run `openspec validate --all` before committing
+5. Archive completed changes with `openspec archive <id>`
+
+### Archived Changes
+All completed changes are moved to `openspec/changes/archive/` with timestamps:
+- `2026-02-03-refactor-agent-architecture` - LangGraph StateGraph refactor
+- `2026-02-03-replace-crawl4ai-with-mcp-fetch` - Content extraction migration
+- `2026-02-03-enhance-report-quality` - Quantitative analysis and SMART recommendations
+
+### Active Specs
+- `specs/research-report/spec.md` - Market research report format and quality standards
