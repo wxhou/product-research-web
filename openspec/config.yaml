@@ -1,0 +1,99 @@
+# OpenSpec Configuration
+
+# Context included in every OpenSpec request - works more reliably than project.md
+context:
+  # Project Purpose
+  description: |
+    Product Research Web is a Next.js-based AI-powered product research platform.
+    Users create research projects with keywords, and the system performs automated
+    web research using a multi-agent LangGraph architecture, generating comprehensive
+    product analysis reports with LLM-powered insights.
+
+  # Key Technologies
+  tech_stack:
+    frontend: "Next.js 16.1.4, React 19.2.3, Tailwind CSS 4"
+    language: "TypeScript 5.9.3"
+    database: "SQLite with better-sqlite3"
+    llm: "LangChain 1.1.17, LangGraph 1.1.22"
+    state: "LangGraph StateGraph for workflow orchestration"
+    mcp: "@modelcontextprotocol/sdk 1.25.3"
+
+  # Important Constraints
+  constraints:
+    - "SQLite database: data/research.db"
+    - "Max 3 concurrent research tasks per user"
+    - "Session-based cookie auth (no JWT stored)"
+    - "LLM calls execute server-side only"
+    - "State saved to task-data/{projectId}/state.md"
+    - "Checkpoint every 30 seconds during research"
+
+  # Architecture Patterns
+  architecture:
+    multi_agent:
+      - "Supervisor Agent: Routes tasks to worker agents"
+      - "Worker Agents: Planner, Searcher, Extractor, Analyzer, Reporter"
+      - "Shared ResearchState with checkpoint persistence"
+    quantitative_analysis:
+      - "MarketDataAnalyzer: Market size, growth trends, segmentation"
+      - "UserResearchAnalyzer: User personas, penetration, NPS"
+      - "CompetitorQuantitativeAnalyzer: Market share, LTV/CAC, revenue"
+      - "BusinessModelAnalyzer: Pricing, Unit Economics, maturity"
+    report_engine:
+      - "SMART principle strategic recommendations"
+      - "Mermaid charts auto-embedded"
+      - "Data quality assessment with source attribution"
+
+  # External Dependencies
+  external_apis:
+    llm_providers: ["OpenAI", "Anthropic", "DeepSeek", "Google Gemini", "Moonshot/Kimi"]
+    search_apis: ["Brave Search (primary)", "DuckDuckGo", "Bing"]
+    data_sources:
+      rss: ["Hacker News", "TechCrunch", "The Verge", "Product Hunt", "36Kr"]
+      github: "Repository search and content extraction"
+      reddit: "Subreddit search and post extraction"
+    mcp: "zcaceres/fetch-mcp for full-page content extraction"
+
+  # Project Structure
+  directory_structure:
+    src/lib/research-agent: "Multi-agent research workflow (index.ts, service.ts, supervisor/, workers/, graph/)"
+    src/lib/llm: "LLM client and providers"
+    src/lib/db: "Database schema and helpers"
+    src/lib/datasources: "RSS, search, GitHub, Reddit integrations"
+    src/app/api: "Next.js API routes"
+    src/components: "React components"
+    src/contexts: "React Context (Auth, Theme)"
+
+  # Naming Conventions
+  naming:
+    files: "PascalCase for components, camelCase for utilities"
+    interfaces: "PascalCase (Project, SearchResult, TaskStatus)"
+    constants: "SCREAMING_SCALAR_CASE (DEFAULT_CONFIG, PRODUCT_ANALYST_PROMPT)"
+    db_tables: "snake_case (search_results, progress_message)"
+
+  # Research Workflow
+  workflow:
+    phases: ["Plan", "Search", "Extract", "Analyze", "Report"]
+    output: "Markdown reports with embedded Mermaid diagrams"
+    state_persistence: "File-based with SHA-256 integrity verification"
+
+# Active specs and changes
+active_specs:
+  - "specs/research-report/spec.md - Market research report format and quality standards"
+
+archived_changes:
+  - "2026-02-03-refactor-agent-architecture - LangGraph StateGraph refactor"
+  - "2026-02-03-replace-crawl4ai-with-mcp-fetch - Content extraction migration"
+  - "2026-02-03-enhance-report-quality - Quantitative analysis and SMART recommendations"
+  - "2026-02-04-enhance-report-executability - Report executability improvements"
+
+# OpenSpec change categories
+change_categories:
+  - feat: "New feature implementations"
+  - refactor: "Architectural refactoring"
+  - enhance: "Quality improvements and optimizations"
+
+# Template configuration
+templates:
+  default_change_directory: "openspec/changes/{category}-{description}"
+  tasks_file: "tasks.md"
+  archive_directory: "openspec/changes/archive"
