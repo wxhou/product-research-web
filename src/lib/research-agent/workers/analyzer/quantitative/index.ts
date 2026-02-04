@@ -10,3 +10,4 @@ export * from './competitor-analyzer';
 export * from './business-model-analyzer';
 export * from './user-research-analyzer';
 export * from './visualizer';
+export * from './quality-assessor';

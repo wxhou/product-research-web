@@ -224,6 +224,11 @@ All completed changes are moved to `openspec/changes/archive/` with timestamps:
 - `2026-02-03-refactor-agent-architecture` - LangGraph StateGraph refactor
 - `2026-02-03-replace-crawl4ai-with-mcp-fetch` - Content extraction migration
 - `2026-02-03-enhance-report-quality` - Quantitative analysis and SMART recommendations
+- `2026-02-04-enhance-report-executability` - Report executability improvements for business decision makers
+
+### Active Changes
+
+- (No active changes)
 
 ### Active Specs
 - `specs/research-report/spec.md` - Market research report format and quality standards

@@ -184,4 +184,99 @@ describe('CompetitorQuantitative Type Tests', () => {
       expect(ratio).toBeGreaterThan(0);
     });
   });
+
+  describe('Capability Score', () => {
+    it('should have capability score structure', () => {
+      const data: CompetitorQuantitative = {
+        capabilityScore: [
+          {
+            competitor: 'Leader A',
+            overallScore: 85,
+            technologyScore: 90,
+            marketScore: 80,
+            productScore: 85,
+            financialScore: 80,
+            strengths: ['技术能力强', '市场份额大'],
+            weaknesses: ['价格较高'],
+            assessment: 'Leader',
+          },
+        ],
+      };
+
+      expect(data.capabilityScore).toHaveLength(1);
+      expect(data.capabilityScore?.[0].overallScore).toBe(85);
+      expect(data.capabilityScore?.[0].assessment).toBe('Leader');
+    });
+
+    it('should allow multiple competitors with different assessments', () => {
+      const data: CompetitorQuantitative = {
+        capabilityScore: [
+          {
+            competitor: 'A',
+            overallScore: 85,
+            technologyScore: 90,
+            marketScore: 80,
+            productScore: 85,
+            financialScore: 80,
+            strengths: [],
+            weaknesses: [],
+            assessment: 'Leader',
+          },
+          {
+            competitor: 'B',
+            overallScore: 65,
+            technologyScore: 60,
+            marketScore: 70,
+            productScore: 65,
+            financialScore: 60,
+            strengths: [],
+            weaknesses: [],
+            assessment: 'Strong',
+          },
+          {
+            competitor: 'C',
+            overallScore: 45,
+            technologyScore: 40,
+            marketScore: 50,
+            productScore: 45,
+            financialScore: 40,
+            strengths: [],
+            weaknesses: [],
+            assessment: 'Average',
+          },
+        ],
+      };
+
+      expect(data.capabilityScore).toHaveLength(3);
+      expect(data.capabilityScore?.[0].assessment).toBe('Leader');
+      expect(data.capabilityScore?.[1].assessment).toBe('Strong');
+      expect(data.capabilityScore?.[2].assessment).toBe('Average');
+    });
+
+    it('should calculate scores within valid range', () => {
+      const data: CompetitorQuantitative = {
+        capabilityScore: [
+          {
+            competitor: 'A',
+            overallScore: 85,
+            technologyScore: 90,
+            marketScore: 80,
+            productScore: 85,
+            financialScore: 80,
+            strengths: [],
+            weaknesses: [],
+            assessment: 'Leader',
+          },
+        ],
+      };
+
+      const score = data.capabilityScore?.[0];
+      expect(score?.overallScore).toBeGreaterThanOrEqual(0);
+      expect(score?.overallScore).toBeLessThanOrEqual(100);
+      expect(score?.technologyScore).toBeGreaterThanOrEqual(0);
+      expect(score?.technologyScore).toBeLessThanOrEqual(100);
+      expect(score?.marketScore).toBeGreaterThanOrEqual(0);
+      expect(score?.marketScore).toBeLessThanOrEqual(100);
+    });
+  });
 });

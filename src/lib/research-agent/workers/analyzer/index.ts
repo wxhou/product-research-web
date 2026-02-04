@@ -18,6 +18,7 @@ import { updateProgress } from '../../progress/tracker';
 import { createCancelCheck } from '../../cancellation/handler';
 import { getFileStorageService, type FileStorageService } from '@/lib/file-storage';
 import { jsonrepair } from 'jsonrepair';
+import { createQualityAssessor } from '../quantitative/quality-assessor';
 
 /**
  * Analyzer Agent 配置
@@ -321,6 +322,20 @@ async function executeIncrementalAnalysis(
   // 评估数据质量
   const quality = evaluateDataQuality(fullAnalysis, rawFiles.length);
 
+  // 计算质量评估分数
+  const qualityAssessor = createQualityAssessor();
+  const qualityAssessment = qualityAssessor.assess(fullAnalysis);
+
+  // 将 qualityAssessment 添加到 fullAnalysis
+  fullAnalysis.qualityAssessment = {
+    dataCompletenessScore: qualityAssessment.completenessScore,
+    sourceCredibilityScore: qualityAssessment.credibilityScore,
+    visualizationCoverageScore: qualityAssessment.visualizationScore,
+    overallQualityScore: qualityAssessment.overallScore,
+    dataGaps: qualityAssessment.dataGaps,
+    recommendations: qualityAssessment.recommendations,
+  };
+
   // 更新进度：完成
   await updateProgress(projectId, {
     stage: 'analyzing',
@@ -430,6 +445,20 @@ async function executeBatchAnalysis(
 
   // 评估数据质量
   const quality = evaluateDataQuality(analysis, rawFiles.length);
+
+  // 计算质量评估分数
+  const qualityAssessor = createQualityAssessor();
+  const qualityAssessment = qualityAssessor.assess(analysis);
+
+  // 将 qualityAssessment 添加到 analysis
+  analysis.qualityAssessment = {
+    dataCompletenessScore: qualityAssessment.completenessScore,
+    sourceCredibilityScore: qualityAssessment.credibilityScore,
+    visualizationCoverageScore: qualityAssessment.visualizationScore,
+    overallQualityScore: qualityAssessment.overallScore,
+    dataGaps: qualityAssessment.dataGaps,
+    recommendations: qualityAssessment.recommendations,
+  };
 
   // 更新进度
   await updateProgress(projectId, {

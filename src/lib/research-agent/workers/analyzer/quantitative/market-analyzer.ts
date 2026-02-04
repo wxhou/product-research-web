@@ -240,6 +240,188 @@ export class MarketDataAnalyzer {
 
     return constraints;
   }
+
+  /**
+   * 分析市场集中度
+   */
+  analyzeMarketConcentration(competitors: Array<{ name: string; marketShare?: number }>): MarketConcentration {
+    // 按市场份额排序
+    const sorted = [...competitors].sort((a, b) => (b.marketShare || 0) - (a.marketShare || 0));
+
+    // 计算头部3家和5家份额
+    const top3Share = sorted.slice(0, 3).reduce((sum, c) => sum + (c.marketShare || 0), 0);
+    const top5Share = sorted.slice(0, 5).reduce((sum, c) => sum + (c.marketShare || 0), 0);
+
+    // 计算 HHI (Herfindahl-Hirschman Index)
+    const hhi = competitors.reduce((sum, c) => {
+      const share = c.marketShare || 0;
+      return sum + share * share;
+    }, 0);
+
+    // 判断集中度类型
+    let type: MarketConcentration['type'];
+    let description: string;
+    if (hhi > 2500) {
+      type = '高度集中';
+      description = '市场由少数几家主导，新进入者面临较高壁垒';
+    } else if (hhi > 1500) {
+      type = '中度集中';
+      description = '市场有明显的领导者和挑战者，竞争格局相对稳定';
+    } else if (hhi > 1000) {
+      type = '中度分散';
+      description = '市场竞争较为充分，没有明显的垄断者';
+    } else {
+      type = '高度分散';
+      description = '市场高度碎片化，存在大量中小玩家';
+    }
+
+    return {
+      type,
+      top3Share: Math.round(top3Share * 10) / 10,
+      top5Share: Math.round(top5Share * 10) / 10,
+      hhi: Math.round(hhi * 10) / 10,
+      description,
+      competitiveDynamics: this.generateCompetitiveDynamics(sorted, type),
+    };
+  }
+
+  /**
+   * 生成竞争动态描述
+   */
+  private generateCompetitiveDynamics(
+    sorted: Array<{ name: string; marketShare?: number }>,
+    type: MarketConcentration['type']
+  ): string[] {
+    const dynamics: string[] = [];
+
+    if (sorted.length > 0 && sorted[0].marketShare) {
+      dynamics.push(`领导者 ${sorted[0].name} 占据 ${sorted[0].marketShare}% 市场份额`);
+    }
+
+    if (type === '高度集中') {
+      dynamics.push('头部厂商形成寡头格局，市场份额集中度高');
+      dynamics.push('新进入者面临较高的资金和技术壁垒');
+    } else if (type === '中度集中') {
+      dynamics.push('市场存在1-2家领导者和若干挑战者');
+      dynamics.push('差异化竞争是主要竞争策略');
+    } else if (type === '中度分散') {
+      dynamics.push('市场竞争充分，玩家众多');
+      dynamics.push('产品差异化和价格竞争并存');
+    } else {
+      dynamics.push('市场高度碎片化，没有明确的领导者');
+      dynamics.push('存在大量细分市场机会');
+    }
+
+    return dynamics;
+  }
+
+  /**
+   * 分析市场竞争格局
+   */
+  analyzeCompetitiveDynamics(competitors: Array<{ name: string; marketShare?: number; description?: string }>): MarketCompetitiveDynamics {
+    const sorted = [...competitors].sort((a, b) => (b.marketShare || 0) - (a.marketShare || 0));
+
+    // 识别领导者
+    const leader = sorted[0]?.name || '暂无明确领导者';
+    const leaderShare = sorted[0]?.marketShare || 0;
+
+    // 识别挑战者（市场份额 5-20%）
+    const challengers = sorted.slice(1, 5)
+      .filter(c => (c.marketShare || 0) >= 5 && (c.marketShare || 0) <= 20)
+      .map(c => c.name);
+
+    // 识别市场空白点
+    const marketGaps = this.identifyMarketGaps(competitors);
+
+    // 识别进入壁垒
+    const entryBarriers = this.identifyEntryBarriers(competitors);
+
+    return {
+      leader,
+      leaderShare,
+      challengers,
+      marketGaps,
+      entryBarriers,
+    };
+  }
+
+  /**
+   * 识别市场空白点
+   */
+  private identifyMarketGaps(competitors: Array<{ name: string; description?: string }>): string[] {
+    const gaps: string[] = [];
+
+    // 基于竞品数量判断
+    if (competitors.length < 5) {
+      gaps.push('市场参与者较少，存在较多未被满足的需求');
+    }
+
+    // 基于描述识别
+    const descriptions = competitors.map(c => c.description?.toLowerCase() || '').join(' ');
+
+    if (!descriptions.includes('中小企业')) {
+      gaps.push('针对中小企业的解决方案可能不足');
+    }
+    if (!descriptions.includes('移动端') && !descriptions.includes('mobile')) {
+      gaps.push('移动端产品/服务可能存在机会');
+    }
+    if (!descriptions.includes('行业垂直')) {
+      gaps.push('垂直行业解决方案可能存在空白');
+    }
+
+    return gaps;
+  }
+
+  /**
+   * 识别进入壁垒
+   */
+  private identifyEntryBarriers(competitors: Array<{ name: string; description?: string }>): string[] {
+    const barriers: string[] = [];
+
+    // 基于市场集中度
+    const totalShare = competitors.reduce((sum, c) => sum + (c.marketShare || 0), 0);
+    if (totalShare > 80) {
+      barriers.push('市场份额高度集中，新进入者需克服现有用户基础');
+    }
+
+    // 基于描述识别
+    const descriptions = competitors.map(c => c.description?.toLowerCase() || '').join(' ');
+
+    if (descriptions.includes('技术') || descriptions.includes('技术壁垒')) {
+      barriers.push('技术要求高，需要核心算法或技术积累');
+    }
+    if (descriptions.includes('数据') || descriptions.includes('数据壁垒')) {
+      barriers.push('数据积累是关键竞争优势，新进入者难以获取');
+    }
+    if (descriptions.includes('品牌') || descriptions.includes('品牌认知')) {
+      barriers.push('品牌认知度高，用户忠诚度可能较高');
+    }
+
+    return barriers;
+  }
+}
+
+/**
+ * 市场集中度类型
+ */
+export interface MarketConcentration {
+  type: '高度集中' | '中度集中' | '中度分散' | '高度分散';
+  top3Share: number;
+  top5Share: number;
+  hhi: number;
+  description: string;
+  competitiveDynamics: string[];
+}
+
+/**
+ * 市场竞争格局
+ */
+export interface MarketCompetitiveDynamics {
+  leader: string;
+  leaderShare: number;
+  challengers: string[];
+  marketGaps: string[];
+  entryBarriers: string[];
 }
 
 /**

@@ -41,6 +41,9 @@ export class CompetitorQuantitativeAnalyzer {
     // 计算 LTV/CAC 比率
     result.ltvCacRatio = this.calculateLtvCacRatios(result);
 
+    // 分析竞品能力评分
+    result.capabilityScore = this.analyzeCompetitorCapabilities(competitors);
+
     return result;
   }
 
@@ -206,6 +209,192 @@ export class CompetitorQuantitativeAnalyzer {
     }
 
     return ratios;
+  }
+
+  /**
+   * 分析竞品能力评分
+   */
+  private analyzeCompetitorCapabilities(competitors: CompetitorAnalysis[]): CompetitorQuantitative['capabilityScore'] {
+    const scores: CompetitorQuantitative['capabilityScore'] = [];
+
+    for (const competitor of competitors) {
+      // 基于竞品特征生成能力评分
+      // 技术能力评分 (0-100)
+      const technologyScore = this.calculateTechnologyScore(competitor);
+
+      // 市场能力评分 (0-100)
+      const marketScore = this.calculateMarketScore(competitor);
+
+      // 产品能力评分 (0-100)
+      const productScore = this.calculateProductScore(competitor);
+
+      // 财务能力评分 (0-100)
+      const financialScore = this.calculateFinancialScore(competitor);
+
+      // 综合评分
+      const overallScore = Math.round(
+        technologyScore * 0.25 + marketScore * 0.25 + productScore * 0.30 + financialScore * 0.20
+      );
+
+      // 识别优势和劣势
+      const { strengths, weaknesses } = this.identifyCapabilities(competitor, {
+        technologyScore,
+        marketScore,
+        productScore,
+        financialScore,
+      });
+
+      // 评估等级
+      let assessment: 'Leader' | 'Strong' | 'Average' | 'Weak';
+      if (overallScore >= 80) {
+        assessment = 'Leader';
+      } else if (overallScore >= 60) {
+        assessment = 'Strong';
+      } else if (overallScore >= 40) {
+        assessment = 'Average';
+      } else {
+        assessment = 'Weak';
+      }
+
+      scores.push({
+        competitor: competitor.name,
+        overallScore,
+        technologyScore,
+        marketScore,
+        productScore,
+        financialScore,
+        strengths,
+        weaknesses,
+        assessment,
+      });
+    }
+
+    return scores;
+  }
+
+  /**
+   * 计算技术能力评分
+   */
+  private calculateTechnologyScore(competitor: CompetitorAnalysis): number {
+    let score = 50; // 基础分
+
+    // 基于市场定位
+    if (competitor.marketPosition === '领导者') score += 25;
+    else if (competitor.marketPosition === '挑战者') score += 15;
+    else if (competitor.marketPosition === '跟随者') score += 5;
+
+    // 基于特征数量（反映产品成熟度）
+    if (competitor.features && competitor.features.length >= 10) score += 15;
+    else if (competitor.features && competitor.features.length >= 5) score += 10;
+    else if (competitor.features && competitor.features.length > 0) score += 5;
+
+    return Math.min(100, Math.max(0, score));
+  }
+
+  /**
+   * 计算市场能力评分
+   */
+  private calculateMarketScore(competitor: CompetitorAnalysis): number {
+    let score = 50; // 基础分
+
+    // 基于市场定位
+    if (competitor.marketPosition === '领导者') score += 30;
+    else if (competitor.marketPosition === '挑战者') score += 20;
+    else if (competitor.marketPosition === '跟随者') score += 10;
+
+    // 基于行业
+    if (competitor.industry) score += 10;
+
+    return Math.min(100, Math.max(0, score));
+  }
+
+  /**
+   * 计算产品能力评分
+   */
+  private calculateProductScore(competitor: CompetitorAnalysis): number {
+    let score = 50; // 基础分
+
+    // 基于特征数量
+    if (competitor.features && competitor.features.length >= 15) score += 25;
+    else if (competitor.features && competitor.features.length >= 8) score += 15;
+    else if (competitor.features && competitor.features.length >= 3) score += 10;
+
+    // 基于描述详细程度
+    if (competitor.description && competitor.description.length > 50) score += 10;
+    else if (competitor.description && competitor.description.length > 20) score += 5;
+
+    // 基于市场定位
+    if (competitor.marketPosition === '领导者') score += 15;
+    else if (competitor.marketPosition === '挑战者') score += 10;
+
+    return Math.min(100, Math.max(0, score));
+  }
+
+  /**
+   * 计算财务能力评分
+   */
+  private calculateFinancialScore(competitor: CompetitorAnalysis): number {
+    let score = 50; // 基础分
+
+    // 基于市场定位（财务能力通常与市场地位正相关）
+    if (competitor.marketPosition === '领导者') score += 30;
+    else if (competitor.marketPosition === '挑战者') score += 20;
+    else if (competitor.marketPosition === '跟随者') score += 10;
+
+    return Math.min(100, Math.max(0, score));
+  }
+
+  /**
+   * 识别优势和劣势
+   */
+  private identifyCapabilities(
+    competitor: CompetitorAnalysis,
+    scores: { technologyScore: number; marketScore: number; productScore: number; financialScore: number }
+  ): { strengths: string[]; weaknesses: string[] } {
+    const strengths: string[] = [];
+    const weaknesses: string[] = [];
+
+    const thresholds = {
+      high: 70,
+      low: 40,
+    };
+
+    if (scores.technologyScore >= thresholds.high) {
+      strengths.push('技术能力强，拥有核心竞争优势');
+    } else if (scores.technologyScore <= thresholds.low) {
+      weaknesses.push('技术能力有待提升');
+    }
+
+    if (scores.marketScore >= thresholds.high) {
+      strengths.push('市场影响力大，品牌认知度高');
+    } else if (scores.marketScore <= thresholds.low) {
+      weaknesses.push('市场份额有限，市场影响力不足');
+    }
+
+    if (scores.productScore >= thresholds.high) {
+      strengths.push('产品功能完善，用户体验良好');
+    } else if (scores.productScore <= thresholds.low) {
+      weaknesses.push('产品功能不够完善');
+    }
+
+    if (scores.financialScore >= thresholds.high) {
+      strengths.push('财务状况健康，融资能力强');
+    } else if (scores.financialScore <= thresholds.low) {
+      weaknesses.push('财务压力较大，需要关注现金流');
+    }
+
+    // 基于描述添加特定优势/劣势
+    if (competitor.description) {
+      const desc = competitor.description.toLowerCase();
+      if (desc.includes('创新') || desc.includes('innovative')) {
+        strengths.push('具有创新能力，持续推出新功能');
+      }
+      if (desc.includes('企业') || desc.includes('enterprise')) {
+        strengths.push('拥有企业级客户，服务能力强');
+      }
+    }
+
+    return { strengths, weaknesses };
   }
 
   /**

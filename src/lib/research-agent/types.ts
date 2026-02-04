@@ -284,6 +284,18 @@ export interface CompetitorQuantitative {
     ratio: number;
     assessment: string; // 'Healthy', 'Needs Improvement', etc.
   }>;
+  /** 竞品能力评分 */
+  capabilityScore?: Array<{
+    competitor: string;
+    overallScore: number; // 0-100
+    technologyScore: number;
+    marketScore: number;
+    productScore: number;
+    financialScore: number;
+    strengths: string[];
+    weaknesses: string[];
+    assessment: 'Leader' | 'Strong' | 'Average' | 'Weak';
+  }>;
 }
 
 /** 商业模式分析 - 新增 */

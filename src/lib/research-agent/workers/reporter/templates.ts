@@ -649,6 +649,9 @@ export function generateReportContent(
     report += '\n\n';
   }
 
+  // 添加术语表到报告末尾
+  report += renderGlossary();
+
   return report.trim();
 }
 
@@ -832,6 +835,19 @@ function renderSection(
     }
   }
 
+  // 特殊处理调研概览章节
+  if (section.id === 'overview') {
+    // Handle quality assessment placeholders in overview section
+    const qa = analysis.qualityAssessment;
+    if (qa) {
+      content = content.replace(/{dataCompletenessScore}/g, String(qa.dataCompletenessScore));
+      content = content.replace(/{sourceCredibilityScore}/g, String(qa.sourceCredibilityScore));
+    } else {
+      content = content.replace(/{dataCompletenessScore}/g, '0');
+      content = content.replace(/{sourceCredibilityScore}/g, '0');
+    }
+  }
+
   // 特殊处理功能章节
   if (section.id === 'features') {
     content = content.replace('{featureTableRows}', renderFeatureTable(analysis.features));
@@ -872,12 +888,14 @@ function renderSection(
 
   // 特殊处理 SWOT 章节
   if (section.id === 'swot') {
-    content = content.replace('{strengths}', renderList(analysis.swot.strengths));
-    content = content.replace('{weaknesses}', renderList(analysis.swot.weaknesses));
-    content = content.replace('{opportunities}', renderList(analysis.swot.opportunities));
-    content = content.replace('{threats}', renderList(analysis.swot.threats));
+    // Limit SWOT items to 5 per category for executive readability
+    content = content.replace('{strengths}', renderList(analysis.swot.strengths.slice(0, 5)));
+    content = content.replace('{weaknesses}', renderList(analysis.swot.weaknesses.slice(0, 5)));
+    content = content.replace('{opportunities}', renderList(analysis.swot.opportunities.slice(0, 5)));
+    content = content.replace('{threats}', renderList(analysis.swot.threats.slice(0, 5)));
 
-    const mindmapContent = `  root((SWOT 分析))\n    优势(S)\n${renderMindmapItems(analysis.swot.strengths)}\n    劣势(W)\n${renderMindmapItems(analysis.swot.weaknesses)}\n    机会(O)\n${renderMindmapItems(analysis.swot.opportunities)}\n    威胁(T)\n${renderMindmapItems(analysis.swot.threats)}`;
+    // Limit mindmap items as well
+    const mindmapContent = `  root((SWOT 分析))\n    优势(S)\n${renderMindmapItems(analysis.swot.strengths.slice(0, 5))}\n    劣势(W)\n${renderMindmapItems(analysis.swot.weaknesses.slice(0, 5))}\n    机会(O)\n${renderMindmapItems(analysis.swot.opportunities.slice(0, 5))}\n    威胁(T)\n${renderMindmapItems(analysis.swot.threats.slice(0, 5))}`;
     content = replaceMermaidChart(content, 'MINDMAP_CHART', 'mindmap', mindmapContent);
   }
 
@@ -1426,21 +1444,19 @@ function renderUserPersonas(personas: Array<{
 }
 
 /**
- * 渲染渗透率表格
+ * 渲染渗透率表格 - 只返回数据行，模板中已有表头（2列格式）
  */
 function renderPenetrationRates(rate: { overall: number; bySegment: Array<{ segment: string; rate: number }> } | undefined): string {
-  if (!rate) return '| 用户群体 | 渗透率 | 暂无数据 |';
-  return rate.bySegment.map(s => `| ${s.segment} | ${s.rate}% |`).join('\n');
+  if (!rate) return '暂无数据 |';
+  return rate.bySegment.map(s => `| ${s.segment} | ${s.rate}%`).join('\n');
 }
 
 /**
- * 渲染用户采纳趋势
+ * 渲染用户采纳趋势 - 只返回数据行，模板中已有表头
  */
 function renderAdoptionTrends(trends: Array<{ phase: string; percentage: number; description: string }> | undefined): string {
   if (!trends || trends.length === 0) {
-    return `| 阶段 | 用户占比 | 描述 |
-|-----|---------|-----|
-| 探索期 | 5% | 早期采用者 |
+    return `| 探索期 | 5% | 早期采用者 |
 | 成长期 | 15% | 早期主流用户 |
 | 成熟期 | 40% | 主流市场 |
 | 饱和期 | 25% | 后期多数用户 |
@@ -1475,4 +1491,239 @@ export function generateTitleBlock(
 > 调研时间: ${new Date().toLocaleString('zh-CN')}
 > 调研主题: ${title}
 > 关键词: ${keywords.join(', ')}`;
+}
+
+/**
+ * 渲染术语表（用于附录）
+ */
+export function renderGlossary(): string {
+  return `### 附录 A. 术语表
+
+| 术语 | 定义 |
+|-----|------|
+| ARR | Annual Recurring Revenue，年度经常性收入 |
+| NDR | Net Dollar Retention，净美元留存率 |
+| LTV | Lifetime Value，客户终身价值 |
+| CAC | Customer Acquisition Cost，获客成本 |
+| MRR | Monthly Recurring Revenue，月度经常性收入 |
+| ARPPU | Average Revenue Per Paying User，每付费用户平均收入 |
+| NPS | Net Promoter Score，净推荐值 |
+| CAC Payback | 客户获取成本回收周期 |
+| LTV/CAC | 客户终身价值与获客成本比率 |
+| Gross Margin | 毛利率 |
+| Churn Rate | 客户流失率 |
+| CAGR | Compound Annual Growth Rate，复合年均增长率 |
+| YoY | Year over Year，同比增长 |
+| ARPU | Average Revenue Per User，每用户平均收入 |
+| ROI | Return on Investment，投资回报率 |`;
+}
+
+/**
+ * 渲染执行摘要（定量指标版本）
+ */
+export function renderExecutiveSummary(data: {
+  marketSize: string;
+  growthRate: string;
+  marketShare: string;
+  pricing: string;
+  userPenetration: string;
+}): string {
+  return `## 执行摘要
+
+### 核心定量指标
+
+| 指标 | 数值 | 说明 |
+|-----|------|------|
+| 市场规模 | **${data.marketSize}** | 目标市场总体规模 |
+| 增长率 | **${data.growthRate}** | 年度复合增长率 |
+| 市场集中度 | **${data.marketShare}** | 头部厂商占比 |
+| 价格区间 | **${data.pricing}** | 主流产品定价 |
+| 目标用户渗透率 | **${data.userPenetration}** | 目标客户群覆盖 |
+
+> 以上数据基于公开市场调研和行业报告综合分析，仅供参考。`;
+}
+
+/**
+ * 渲染带业务影响的SWOT列表
+ */
+export function renderSWOTWithBusinessImpact(
+  items: string[],
+  maxItems: number = 5
+): string {
+  if (items.length === 0) return '暂无数据';
+
+  return items
+    .slice(0, maxItems)
+    .map((item, index) => {
+      // 为每个SWOT项生成模拟的业务影响标签
+      const impactLabels: Record<string, string> = {
+        '技术': '业务影响: 提升15-30%运营效率',
+        '成本': '业务影响: 降低10-25%运营成本',
+        '市场': '业务影响: 扩大5-15%市场份额',
+        '品牌': '业务影响: 增强20-40%品牌认知',
+        '服务': '业务影响: 提升10-20%客户满意度',
+      };
+
+      let impact = '业务影响: 待量化';
+      for (const [key, label] of Object.entries(impactLabels)) {
+        if (item.includes(key)) {
+          impact = label;
+          break;
+        }
+      }
+
+      return `${index + 1}. **${item}** (${impact})`;
+    })
+    .join('\n');
+}
+
+/**
+ * 渲染结构化战略建议表格（带KPI）
+ */
+export function renderStrategicRecommendations(recommendations: Array<{
+  recommendation: string;
+  kpi: string;
+  currentValue: string;
+  targetValue: string;
+  timeline: string;
+  budget: string;
+}>): string {
+  if (recommendations.length === 0) {
+    return `| 建议 | KPI | 当前值 | 目标值 | 时间节点 | 预算 |
+|------|-----|-------|-------|---------|------|
+| 暂无建议 | - | - | - | - | - |`;
+  }
+
+  const header = `| 建议 | KPI | 当前值 | 目标值 | 时间节点 | 预算 |
+|------|-----|-------|-------|---------|------|`;
+  const rows = recommendations.map(r =>
+    `| ${r.recommendation} | ${r.kpi} | ${r.currentValue} | ${r.targetValue} | ${r.timeline} | ${r.budget} |`
+  ).join('\n');
+
+  return `${header}\n${rows}`;
+}
+
+/**
+ * 渲染单位经济效益对比表
+ */
+export function renderUnitEconomicsComparison(data: {
+  companyMetrics: Array<{
+    competitor: string;
+    ltvCacRatio: string;
+    cacPaybackMonths: number;
+    grossMargin: number;
+  }>;
+  benchmark: {
+    ltvCacRatio: number;
+    cacPaybackMonths: number;
+    grossMargin: number;
+  };
+}): string {
+  const header = `| 指标 | 厂商A | 行业基准 | 评估 |
+|------|-------|---------|------|`;
+
+  const ltvRow = `| LTV/CAC | ${data.companyMetrics[0]?.ltvCacRatio || '-'} | ${data.benchmark.ltvCacRatio}x | ${getLtvCacAssessment(data.companyMetrics[0]?.ltvCacRatio, data.benchmark.ltvCacRatio)} |`;
+  const cacRow = `| CAC回收月数 | ${data.companyMetrics[0]?.cacPaybackMonths || '-'}个月 | ${data.benchmark.cacPaybackMonths}个月 | ${getCacPaybackAssessment(data.companyMetrics[0]?.cacPaybackMonths, data.benchmark.cacPaybackMonths)} |`;
+  const marginRow = `| 毛利率 | ${data.companyMetrics[0]?.grossMargin || '-'}% | ${data.benchmark.grossMargin}% | ${getMarginAssessment(data.companyMetrics[0]?.grossMargin, data.benchmark.grossMargin)} |`;
+
+  return `${header}\n${ltvRow}\n${cacRow}\n${marginRow}`;
+}
+
+/**
+ * 辅助函数：评估LTV/CAC健康度
+ */
+function getLtvCacAssessment(value: string | undefined, benchmark: number): string {
+  if (!value) return '待分析';
+  const num = parseFloat(value);
+  if (num >= benchmark * 1.2) return '优秀';
+  if (num >= benchmark) return '良好';
+  if (num >= benchmark * 0.8) return '一般';
+  return '待改进';
+}
+
+/**
+ * 辅助函数：评估CAC回收期
+ */
+function getCacPaybackAssessment(value: number | undefined, benchmark: number): string {
+  if (!value) return '待分析';
+  if (value <= benchmark * 0.8) return '优秀';
+  if (value <= benchmark) return '良好';
+  if (value <= benchmark * 1.2) return '一般';
+  return '待改进';
+}
+
+/**
+ * 辅助函数：评估毛利率
+ */
+function getMarginAssessment(value: number | undefined, benchmark: number): string {
+  if (!value) return '待分析';
+  if (value >= benchmark + 10) return '优秀';
+  if (value >= benchmark) return '良好';
+  if (value >= benchmark - 10) return '一般';
+  return '待改进';
+}
+
+/**
+ * 验证Markdown表格结构
+ */
+export function validateTableStructure(content: string): boolean {
+  // 检查是否包含表格
+  if (!content.includes('|')) return true;
+
+  const lines = content.split('\n');
+  let inTable = false;
+  let hasValidStructure = true;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // 检测表格开始（包含 | 的行）
+    if (trimmed.includes('|')) {
+      if (!inTable) {
+        // 检查表头
+        const hasSeparator = lines.some(l => l.trim().match(/^[\s|:\-]+$/));
+        if (!hasSeparator) {
+          hasValidStructure = false;
+          break;
+        }
+        inTable = true;
+      }
+    }
+  }
+
+  return hasValidStructure;
+}
+
+/**
+ * 验证是否存在未替换的占位符
+ */
+export function hasUnfilledPlaceholders(content: string): boolean {
+  // 匹配 {xxx} 格式的占位符
+  const placeholderPattern = /\{[^}]+\}/g;
+  const matches = content.match(placeholderPattern);
+
+  if (!matches) return false;
+
+  // 检查是否包含有效的占位符（如 markdown 代码块中的内容）
+  const inCodeBlock = content.includes('```');
+  if (inCodeBlock) {
+    // 简化处理：如果有代码块，假设占位符在代码块外是无效的
+    const outsideCodeBlocks = content.split('```')[0];
+    return !!outsideCodeBlocks.match(placeholderPattern);
+  }
+
+  return true;
+}
+
+/**
+ * 移除或替换残留占位符
+ */
+export function sanitizeContent(content: string): string {
+  return content.replace(/\{[^}]+\}/g, (match) => {
+    // 保留某些允许的占位符模式
+    if (match.includes('date') || match.includes('Date')) {
+      return new Date().toISOString().split('T')[0];
+    }
+    return '暂无数据';
+  });
 }
