@@ -820,6 +820,16 @@ function renderSection(
     content = content.replace(/{keyStrengths}/g, analysis.swot.strengths.slice(0, 2).join('，') || '待分析');
     content = content.replace(/{marketOpportunity}/g, analysis.marketData.opportunities[0] || analysis.marketData.trends[0] || '待分析');
     content = content.replace(/{recommendationFocus}/g, analysis.swot.opportunities.slice(0, 2).join('，') || '待分析');
+
+    // Handle quality assessment placeholders in abstract section
+    const qa = analysis.qualityAssessment;
+    if (qa) {
+      content = content.replace(/{dataCompletenessScore}/g, String(qa.dataCompletenessScore));
+      content = content.replace(/{sourceCredibilityScore}/g, String(qa.sourceCredibilityScore));
+    } else {
+      content = content.replace(/{dataCompletenessScore}/g, '0');
+      content = content.replace(/{sourceCredibilityScore}/g, '0');
+    }
   }
 
   // 特殊处理功能章节
@@ -835,6 +845,28 @@ function renderSection(
     content = content.replace('{competitorAnalysis}', renderCompetitorAnalysis(analysis.competitors));
     content = content.replace('{competitorDifferentiation}', renderCompetitorDifferentiation(analysis.competitors));
     content = content.replace('{marketGaps}', renderMarketGaps(analysis.competitors, analysis.features));
+    content = content.replace('{competitorMindmap}', renderCompetitorMindmap(analysis.competitors));
+
+    // Handle market share pie chart
+    const cq = analysis.competitorQuantitative;
+    if (cq && cq.marketShare && cq.marketShare.length > 0) {
+      const currentYear = new Date().getFullYear();
+      content = content.replace(/{currentYear}/g, String(currentYear));
+      const pieData = cq.marketShare.map(m => `  "${m.competitor}" : ${m.share}`).join('\n');
+      content = content.replace(/{marketSharePie}/g, pieData);
+    } else {
+      content = content.replace(/{currentYear}/g, String(new Date().getFullYear()));
+      content = content.replace(/{marketSharePie}/g, '  "暂无数据" : 100');
+    }
+
+    // Handle LTV/CAC ratio table
+    if (cq && cq.ltvCacRatio && cq.ltvCacRatio.length > 0) {
+      const ltvRows = cq.ltvCacRatio.map(l => `| ${l.competitor} | ${l.ratio} | ${l.health} |`).join('\n');
+      content = content.replace(/{ltvCacRatio}/g, ltvRows);
+    } else {
+      content = content.replace(/{ltvCacRatio}/g, '| 暂无LTV/CAC数据 | - | 待分析 |');
+    }
+
     content = replaceMermaidChart(content, 'MINDMAP_CHART', 'mindmap\n  root((竞品分析))', renderCompetitorMindmap(analysis.competitors));
   }
 
@@ -1397,7 +1429,7 @@ function renderUserPersonas(personas: Array<{
  * 渲染渗透率表格
  */
 function renderPenetrationRates(rate: { overall: number; bySegment: Array<{ segment: string; rate: number }> } | undefined): string {
-  if (!rate) return '| 用户群体 | 渗透率 |暂无数据';
+  if (!rate) return '| 用户群体 | 渗透率 | 暂无数据 |';
   return rate.bySegment.map(s => `| ${s.segment} | ${s.rate}% |`).join('\n');
 }
 
@@ -1405,7 +1437,15 @@ function renderPenetrationRates(rate: { overall: number; bySegment: Array<{ segm
  * 渲染用户采纳趋势
  */
 function renderAdoptionTrends(trends: Array<{ phase: string; percentage: number; description: string }> | undefined): string {
-  if (!trends || trends.length === 0) return '| 阶段 | 用户占比 | 描述 |\n|-----|---------|-----|\n| 探索期 | 5% | 早期采用者 |';
+  if (!trends || trends.length === 0) {
+    return `| 阶段 | 用户占比 | 描述 |
+|-----|---------|-----|
+| 探索期 | 5% | 早期采用者 |
+| 成长期 | 15% | 早期主流用户 |
+| 成熟期 | 40% | 主流市场 |
+| 饱和期 | 25% | 后期多数用户 |
+| 衰退期 | 15% | 后期少数用户 |`;
+  }
   return trends.map(t => `| ${t.phase} | ${t.percentage}% | ${t.description} |`).join('\n');
 }
 
