@@ -33,14 +33,39 @@ export interface ReporterConfig {
   includeCharts: boolean;
   /** 是否包含引用 */
   includeCitations: boolean;
+  /** 是否使用新报告格式（优化版） */
+  useNewFormat?: boolean;
 }
 
-/** 默认配置 */
+/** Feature flag：是否默认启用新报告格式 */
+const USE_NEW_REPORT_FORMAT = process.env.USE_NEW_REPORT_FORMAT === 'true';
+
+/** 默认配置（使用旧版格式） */
 const DEFAULT_CONFIG: ReporterConfig = {
   includeSections: ['abstract', 'overview', 'features', 'competitors', 'swot', 'recommendations', 'sources'],
   includeCharts: true,
   includeCitations: true,
+  useNewFormat: USE_NEW_REPORT_FORMAT,
 };
+
+/** 新版报告格式的 section 列表 */
+const NEW_FORMAT_SECTIONS = [
+  'executive-summary',
+  'market-overview',
+  'competitive-landscape',
+  'benchmark-analysis',
+  'swot-strategy',
+  'data-quality',
+  'appendix'
+];
+
+/** 根据配置获取要使用的 section 列表 */
+function getIncludeSections(config: ReporterConfig): string[] {
+  if (config.useNewFormat) {
+    return NEW_FORMAT_SECTIONS;
+  }
+  return config.includeSections;
+}
 
 /**
  * Reporter Agent 执行结果
@@ -122,6 +147,9 @@ async function executeReport(
     const dataSources = [...new Set(searchResults.map((r) => r.source))];
     const sourceNames = dataSources.map((s) => formatSourceName(s));
 
+    // 根据配置确定使用新格式还是旧格式
+    const useNewFormat = config.useNewFormat ?? false;
+
     // 生成报告内容
     const reportContent = generateReportContent(
       title,
@@ -129,7 +157,8 @@ async function executeReport(
       searchResults.length,
       state.extractedContent.length,
       analysis as any,
-      sourceNames
+      sourceNames,
+      { useNewFormat }
     );
 
     // 生成标题块

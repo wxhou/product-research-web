@@ -2,6 +2,7 @@
 
 ## Purpose
 TBD - created by archiving change enhance-report-quality. Update Purpose after archive.
+
 ## Requirements
 ### Requirement: Quantitative Market Data Analysis
 
@@ -195,3 +196,126 @@ The system SHALL provide a quality assessment score for generated reports based 
 - **AND** it SHALL calculate a visualization coverage score based on industry benchmarks
 - **AND** it SHALL provide recommendations for additional visualizations if coverage is below threshold
 
+### Requirement: Tiered Competitor Analysis
+
+The system SHALL implement tiered competitor analysis with different levels of detail for different ranking tiers.
+
+#### Scenario: Top 5 competitors receive full analysis
+
+- **WHEN** competitor analysis is generated
+- **THEN** the system SHALL provide full analysis for the Top 5 competitors
+- **AND** each SHALL include:
+  - Industry positioning
+  - Market positioning
+  - Core features list
+  - Product description
+  - Competitive advantages
+
+#### Scenario: Top 6-10 competitors receive summary analysis
+
+- **WHEN** competitor analysis is generated
+- **THEN** competitors ranked 6-10 SHALL receive summary analysis
+- **AND** each SHALL include:
+  - One-sentence positioning statement
+  - Key differentiator (if any)
+  - Reference to competitive matrix
+
+#### Scenario: Remaining competitors are referenced in matrix
+
+- **WHEN** there are more than 10 competitors
+- **THEN** competitors ranked 11+ SHALL be referenced in the competitive matrix
+- **AND** they SHALL NOT receive individual analysis sections
+
+### Requirement: Top 10 Selection Criteria
+
+The system SHALL use a weighted scoring algorithm to determine Top 10 competitors.
+
+#### Scenario: Selection based on multiple factors
+
+- **WHEN** determining Top 10 competitors
+- **THEN** the system SHALL consider:
+  - Mention count in source data (weight: 40%)
+  - Feature completeness in analysis (weight: 30%)
+  - Description length/detail (weight: 20%)
+  - Market position clarity (weight: 10%)
+
+#### Scenario: Selection results are deterministic
+
+- **WHEN** the same source data is analyzed
+- **THEN** the Top 10 selection SHALL produce identical results
+- **AND** the selection SHALL be reproducible
+
+### Requirement: Executive Summary Card Display
+
+The system SHALL generate an executive summary card at the beginning of each research report that displays 5 core insights in a scannable format.
+
+#### Scenario: Card displays 5 core metrics
+
+- **WHEN** a research report is generated
+- **THEN** the executive summary card SHALL display:
+  - 市场规模 (Market Size): Value with trend indicator and brief description
+  - 增长率 (Growth Rate): Percentage with YoY indicator
+  - 市场集中度 (Market Concentration): Level indicator (High/Medium/Low)
+  - Top 竞品 (Top Competitors): Top 3 competitor names
+  - 核心建议 (Key Recommendation): One actionable insight
+
+#### Scenario: Card uses visual indicators
+
+- **WHEN** the executive summary card is rendered
+- **THEN** it SHALL use emoji indicators for quick scanning:
+  - 🔥 for hot/large market
+  - 📈 for positive growth
+  - ⚡ for high concentration
+  - 💡 for recommendations
+
+#### Scenario: Card includes quality scores
+
+- **WHEN** the executive summary card is generated
+- **THEN** it SHALL include:
+  - 数据完整度 (Data Completeness Score): X/100
+  - 置信度 (Confidence Level): X%
+
+#### Scenario: Card position in report
+
+- **WHEN** a report is rendered
+- **THEN** the executive summary card SHALL appear as Section 0 (before all numbered sections)
+- **AND** it SHALL use the title "执行摘要卡片"
+
+### Requirement: Unified Data Quality Section
+
+The system SHALL replace scattered "暂无数据" (no data available) messages with a dedicated "数据质量说明" (Data Quality Note) section.
+
+#### Scenario: Dedicated section replaces scattered messages
+
+- **WHEN** a report is generated with missing data
+- **THEN** the system SHALL NOT display scattered "暂无数据" messages in individual sections
+- **AND** instead, it SHALL aggregate all missing data information into a single "数据质量说明" section
+
+#### Scenario: Section includes completeness score
+
+- **WHEN** the data quality section is generated
+- **THEN** it SHALL calculate and display:
+  - Overall Data Completeness Score: X/100
+  - Score breakdown by dimension (market data, competitor data, user data)
+
+#### Scenario: Section provides improvement suggestions
+
+- **WHEN** the data quality section is generated
+- **THEN** it SHALL provide actionable suggestions for data improvement:
+  - Suggested data sources to consult
+  - Specific metrics to prioritize
+  - Data collection recommendations
+
+#### Scenario: Missing data placeholder standardization
+
+- **WHEN** specific analysis cannot be performed due to missing data
+- **THEN** the system SHALL display "待分析" (pending analysis)
+- **AND** it SHALL include a reference to the data quality section
+
+#### Scenario: Confidence levels clearly marked
+
+- **WHEN** data with varying confidence levels is displayed
+- **THEN** it SHALL be marked with:
+  - 高置信度 (High): Data from official/authoritative sources
+  - 中置信度 (Medium): Data from industry reports/public analysis
+  - 低置信度 (Low): Data based on model inference

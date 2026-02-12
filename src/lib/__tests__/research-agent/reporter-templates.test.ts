@@ -12,6 +12,10 @@ import {
   validateTableStructure,
   hasUnfilledPlaceholders,
   sanitizeContent,
+  renderExecutiveSummaryCard,
+  sortByMarketPosition,
+  renderCompetitorTieredAnalysis,
+  renderDataQualitySection,
 } from '../../research-agent/workers/reporter/templates';
 
 describe('Reporter Templates', () => {
@@ -310,6 +314,302 @@ describe('Reporter Templates', () => {
       const result = sanitizeContent(content);
 
       expect(result).toContain('mermaid');
+    });
+  });
+
+  // ============================================================
+  // 新增：优化报告模板函数测试
+  // ============================================================
+
+  describe('renderExecutiveSummaryCard', () => {
+    it('should render executive summary card with all metrics', () => {
+      const card = renderExecutiveSummaryCard({
+        title: "AI写作助手市场调研",
+        keywords: ["AI", "写作", "NLP"],
+        searchResultCount: 150,
+        extractionCount: 45,
+        analysis: {
+          features: [
+            { name: "智能写作", count: 25, description: "自动生成文本内容" },
+            { name: "语法检查", count: 18, description: "自动检测语法错误" }
+          ],
+          competitors: [
+            { name: "产品A", industry: "AI", features: ["功能1", "功能2"], description: "详细描述产品A的功能特点和市场定位", marketPosition: "领导者" },
+            { name: "产品B", industry: "AI", features: ["功能3"], description: "产品B的描述", marketPosition: "挑战者" }
+          ],
+          marketData: {
+            marketSize: "280亿元",
+            growthRate: "32.5%",
+            marketConcentration: "头部5家占65%",
+            trends: ["趋势1", "趋势2"],
+            opportunities: ["机会1"]
+          },
+          swot: {
+            strengths: ["技术领先"],
+            opportunities: ["市场需求增长"]
+          },
+          qualityAssessment: {
+            dataCompletenessScore: 85,
+            sourceCredibilityScore: 80,
+            overallQualityScore: 82
+          }
+        }
+      });
+
+      expect(card).toContain('## 执行摘要卡片');
+      expect(card).toContain('| 市场规模 |');
+      expect(card).toContain('| 增长率 |');
+      expect(card).toContain('| 市场集中度 |');
+      expect(card).toContain('| Top 竞品 |');
+      expect(card).toContain('| 核心建议 |');
+      expect(card).toContain('🔥'); // 趋势 indicator
+      expect(card).toContain('📈'); // YoY indicator
+      expect(card).toContain('⚡'); // 集中度 indicator
+      expect(card).toContain('💡'); // 建议 indicator
+      expect(card).toContain('**数据完整度**: 85/100');
+      expect(card).toContain('**置信度**: 82%');
+    });
+
+    it('should show placeholder when no data available', () => {
+      const card = renderExecutiveSummaryCard({
+        title: "测试调研",
+        keywords: [],
+        searchResultCount: 0,
+        extractionCount: 0,
+        analysis: {
+          features: [],
+          competitors: [],
+          marketData: {},
+          swot: { strengths: [], opportunities: [] }
+        }
+      });
+
+      expect(card).toContain('暂无数据');
+      expect(card).toContain('🔥 待分析');
+      expect(card).toContain('📈 待分析');
+      expect(card).toContain('⚡ 待分析');
+    });
+
+    it('should display top 3 competitors from sorted list', () => {
+      const card = renderExecutiveSummaryCard({
+        title: "测试",
+        keywords: [],
+        searchResultCount: 10,
+        extractionCount: 5,
+        analysis: {
+          features: [{ name: "功能1", count: 5, description: "" }],
+          competitors: [
+            { name: "竞品C", industry: "AI", features: ["f1"], description: "短描述", marketPosition: "" },
+            { name: "竞品A", industry: "AI", features: ["f1", "f2", "f3", "f4", "f5"], description: "很长的详细描述".repeat(20), marketPosition: "领导者" },
+            { name: "竞品B", industry: "AI", features: ["f1", "f2"], description: "中等长度的描述", marketPosition: "挑战者" }
+          ],
+          marketData: {},
+          swot: { strengths: [], opportunities: [] }
+        }
+      });
+
+      // 竞品A 有最多功能和最长描述，应该排第一
+      expect(card).toContain('竞品A');
+      expect(card).toContain('竞品B');
+      expect(card).toContain('竞品C');
+    });
+  });
+
+  describe('sortByMarketPosition', () => {
+    it('should return empty array for empty competitors', () => {
+      const result = sortByMarketPosition([]);
+      expect(result).toEqual([]);
+    });
+
+    it('should sort competitors by weighted scoring', () => {
+      const competitors = [
+        { name: "产品A", industry: "AI", features: ["f1", "f2"], description: "描述", marketPosition: "" },
+        { name: "产品B", industry: "AI", features: ["f1", "f2", "f3", "f4", "f5"], description: "很长的详细描述".repeat(20), marketPosition: "领导者" },
+        { name: "产品C", industry: "AI", features: ["f1"], description: "短", marketPosition: "" }
+      ];
+
+      const result = sortByMarketPosition(competitors);
+
+      expect(result[0].name).toBe('产品B'); // 最多功能 + 最长描述
+      expect(result[0].rankingScore).toBeGreaterThan(result[1].rankingScore);
+      expect(result[1].rankingScore).toBeGreaterThan(result[2].rankingScore);
+    });
+
+    it('should add rankingScore to each competitor', () => {
+      const competitors = [
+        { name: "产品A", industry: "AI", features: ["f1"], description: "描述", marketPosition: "领导者" }
+      ];
+
+      const result = sortByMarketPosition(competitors);
+
+      expect(result[0]).toHaveProperty('rankingScore');
+      expect(typeof result[0].rankingScore).toBe('number');
+    });
+
+    it('should prioritize market position clarity', () => {
+      const competitors = [
+        { name: "有定位", industry: "AI", features: ["f1"], description: "描述", marketPosition: "市场领导者" },
+        { name: "无定位", industry: "AI", features: ["f1"], description: "描述", marketPosition: "" }
+      ];
+
+      const result = sortByMarketPosition(competitors);
+
+      expect(result[0].name).toBe('有定位');
+      expect(result[0].rankingScore).toBeGreaterThan(result[1].rankingScore);
+    });
+
+    it('should weight first appearance in list', () => {
+      const competitors = [
+        { name: "第一个", industry: "AI", features: ["f1"], description: "描述", marketPosition: "" },
+        { name: "第二个", industry: "AI", features: ["f1"], description: "描述", marketPosition: "" },
+        { name: "第三个", industry: "AI", features: ["f1"], description: "描述", marketPosition: "" }
+      ];
+
+      const result = sortByMarketPosition(competitors);
+
+      // 第一个应该排名更高（即使其他因素相同）
+      expect(result[0].name).toBe('第一个');
+    });
+  });
+
+  describe('renderCompetitorTieredAnalysis', () => {
+    it('should return placeholder for empty competitors', () => {
+      const result = renderCompetitorTieredAnalysis([]);
+
+      expect(result.benchmarkAnalysis).toBe('暂无竞品深度分析数据');
+      expect(result.top6_10Summary).toBe('暂无竞品摘要数据');
+    });
+
+    it('should generate deep analysis for Top 5', () => {
+      const competitors = [
+        { name: "竞品A", industry: "AI写作", features: ["功能1", "功能2"], description: "产品A是AI写作领域的领导者", marketPosition: "领导者" },
+        { name: "竞品B", industry: "AI写作", features: ["功能3", "功能4"], description: "产品B专注于企业级市场", marketPosition: "挑战者" },
+        { name: "竞品C", industry: "AI写作", features: ["功能5"], description: "产品C是新兴创业公司", marketPosition: "跟随者" }
+      ];
+
+      const result = renderCompetitorTieredAnalysis(competitors);
+
+      expect(result.benchmarkAnalysis).toContain('### 1. 竞品A');
+      expect(result.benchmarkAnalysis).toContain('### 2. 竞品B');
+      expect(result.benchmarkAnalysis).toContain('### 3. 竞品C');
+      expect(result.benchmarkAnalysis).toContain('**行业定位**：AI写作');
+      expect(result.benchmarkAnalysis).toContain('**市场定位**：领导者');
+      expect(result.benchmarkAnalysis).toContain('**核心功能**：功能1、功能2');
+    });
+
+    it('should generate summary table for Top 6-10', () => {
+      const competitors = Array.from({ length: 8 }, (_, i) => ({
+        name: `竞品${i + 1}`,
+        industry: "AI",
+        features: [`功能${i}`],
+        description: `描述${i}`,
+        marketPosition: "跟随者"
+      }));
+
+      const result = renderCompetitorTieredAnalysis(competitors);
+
+      expect(result.top6_10Summary).toContain('| 排名 |');
+      expect(result.top6_10Summary).toContain('| 竞品6 |');
+      expect(result.top6_10Summary).toContain('| 竞品7 |');
+      expect(result.top6_10Summary).toContain('| 竞品8 |');
+    });
+
+    it('should limit to top 5 for deep analysis', () => {
+      const competitors = Array.from({ length: 12 }, (_, i) => ({
+        name: `竞品${i + 1}`,
+        industry: "AI",
+        features: [`功能${i}`],
+        description: `描述${i}`,
+        marketPosition: "定位"
+      }));
+
+      const result = renderCompetitorTieredAnalysis(competitors);
+
+      // 只应该有5个深度分析
+      const deepAnalysisCount = (result.benchmarkAnalysis.match(/### \d+\. 竞品/g) || []).length;
+      expect(deepAnalysisCount).toBe(5);
+    });
+
+    it('should include ranking basis in analysis', () => {
+      const competitors = [
+        { name: "竞品A", industry: "AI", features: ["f1", "f2"], description: "描述ABC", marketPosition: "L" }
+      ];
+
+      const result = renderCompetitorTieredAnalysis(competitors);
+
+      expect(result.benchmarkAnalysis).toContain('**排名依据**：');
+      expect(result.benchmarkAnalysis).toContain('功能完整性 2 项');
+      expect(result.benchmarkAnalysis).toContain('描述 5 字');
+    });
+  });
+
+  describe('renderDataQualitySection', () => {
+    it('should render data quality section with scores', () => {
+      const section = renderDataQualitySection({
+        marketData: { marketSize: "100亿", growthRate: "20%" },
+        competitors: [{ name: "A", features: [], description: "" }],
+        userResearch: { personas: [{ name: "用户1" }] },
+        qualityAssessment: { dataCompletenessScore: 75, sourceCredibilityScore: 80 }
+      });
+
+      expect(section).toContain('### 数据完整度评分:');
+      expect(section).toContain('| 维度 | 评分 | 说明 |');
+      expect(section).toContain('| 市场规模数据 |');
+      expect(section).toContain('| 竞品数据 |');
+      expect(section).toContain('| 用户数据 |');
+      expect(section).toContain('### 数据获取建议');
+      expect(section).toContain('### 置信度说明');
+    });
+
+    it('should calculate correct overall score', () => {
+      const section = renderDataQualitySection({
+        marketData: { marketSize: "100亿", growthRate: "20%" },
+        competitors: [],
+        userResearch: undefined,
+        qualityAssessment: undefined
+      });
+
+      // 市场规模: 80, 竞品: 30, 用户: 20, 平均: 43
+      expect(section).toContain('数据完整度评分: 43/100');
+    });
+
+    it('should show appropriate notes for missing data', () => {
+      const section = renderDataQualitySection({
+        marketData: {},
+        competitors: [],
+        userResearch: undefined,
+        qualityAssessment: undefined
+      });
+
+      expect(section).toContain('缺少具体金额数据');
+      expect(section).toContain('竞品数据不足');
+      expect(section).toContain('基于公开推断');
+    });
+
+    it('should include improvement suggestions', () => {
+      const section = renderDataQualitySection({
+        marketData: {},
+        competitors: [],
+        userResearch: undefined,
+        qualityAssessment: undefined
+      });
+
+      expect(section).toContain('建议补充艾瑞/QuestMobile');
+      expect(section).toContain('建议获取竞品公开财务数据');
+      expect(section).toContain('建议进行用户调研');
+    });
+
+    it('should explain confidence levels', () => {
+      const section = renderDataQualitySection({
+        marketData: { marketSize: "100亿", growthRate: "20%" },
+        competitors: [],
+        userResearch: undefined,
+        qualityAssessment: undefined
+      });
+
+      expect(section).toContain('**高置信度**: 数据来自官方/权威来源');
+      expect(section).toContain('**中置信度**: 数据来自行业报告/公开分析');
+      expect(section).toContain('**低置信度**: 数据基于模型推断');
     });
   });
 });

@@ -1453,21 +1453,6 @@ html[data-theme="dark"] .theme-toggle .moon-icon {
   border-radius: 9999px;
 }
 
-.status-completed {
-  background: var(--success-light);
-  color: var(--success);
-}
-
-.status-processing {
-  background: var(--warning-light);
-  color: var(--warning);
-}
-
-.status-draft {
-  background: var(--background-subtle);
-  color: var(--foreground-secondary);
-}
-
 .loading-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -2362,6 +2347,31 @@ html[data-theme="dark"] .theme-toggle .moon-icon {
   font-weight: 500;
   border-radius: var(--radius-full);
   white-space: nowrap;
+}
+
+.status-badge.status-completed {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.status-badge.status-processing {
+  background: var(--warning-light);
+  color: var(--warning);
+}
+
+.status-badge.status-pending {
+  background: var(--info-light);
+  color: var(--info);
+}
+
+.status-badge.status-draft {
+  background: var(--background-subtle);
+  color: var(--foreground-secondary);
+}
+
+.status-badge.status-failed {
+  background: var(--error-light);
+  color: var(--error);
 }
 
 /* LLM Badge - AI/Rule indicator */
@@ -3306,22 +3316,6 @@ html[data-theme="dark"] .theme-toggle .moon-icon {
 .main-content {
   min-height: calc(100vh - 64px);
   background: var(--background);
-}
-
-/* 状态徽章统一样式 */
-.status-completed {
-  background: var(--success-light);
-  color: var(--success);
-}
-
-.status-processing {
-  background: var(--warning-light);
-  color: var(--warning);
-}
-
-.status-draft {
-  background: var(--background-subtle);
-  color: var(--foreground-secondary);
 }
 
 /* 空状态统一样式 */

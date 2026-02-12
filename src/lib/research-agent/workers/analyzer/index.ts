@@ -598,31 +598,104 @@ function mergeAnalysisResults(
   _sourceUrl: string
 ): Partial<AnalysisResult> {
   // 合并功能（按名称去重，合并来源）
+  // 使用 Map 存储，key 是标准化后的名称
   const featureMap = new Map<string, AnalysisResult['features'][0]>();
 
-  // 添加现有功能
+  // 辅助函数：标准化功能名称用于匹配
+  function normalizeFeatureName(name: string): string {
+    return name
+      .toLowerCase()
+      .replace(/[（）()《》<>""'']/g, '')
+      // 移除非中文字符和数字，保留中文
+      .replace(/[a-z0-9\s\-_.]/gi, '')
+      .replace(/\s+/g, '')
+      .trim();
+  }
+
+  // 辅助函数：检查两个功能名称是否相似（模糊匹配）
+  function isSimilarFeatureName(name1: string, name2: string): boolean {
+    const norm1 = normalizeFeatureName(name1);
+    const norm2 = normalizeFeatureName(name2);
+
+    // 完全匹配
+    if (norm1 === norm2) return true;
+
+    // 一个包含另一个（去除常见词后）
+    const commonWords = ['工具', '平台', '系统', '功能', '协作', '协同', '管理', '办公'];
+    const short1 = norm1.replace(new RegExp(commonWords.join('|'), 'g'), '');
+    const short2 = norm2.replace(new RegExp(commonWords.join('|'), 'g'), '');
+
+    if (short1.length > 2 && short2.length > 2) {
+      // 检查是否相似度 >= 70%
+      const len = Math.max(short1.length, short2.length);
+      let matches = 0;
+      for (let i = 0; i < Math.min(short1.length, short2.length); i++) {
+        if (short1[i] === short2[i]) matches++;
+      }
+      return matches / len >= 0.7;
+    }
+
+    return false;
+  }
+
+  // 辅助函数：选择更好的描述
+  function selectBetterDescription(desc1: string, desc2: string): string {
+    if (!desc1) return desc2;
+    if (!desc2) return desc1;
+    // 选择更长的描述
+    return desc1.length >= desc2.length ? desc1 : desc2;
+  }
+
+  // 添加现有功能到映射表
   const existingFeatures = existing.features || [];
   for (const f of existingFeatures) {
-    featureMap.set(f.name.toLowerCase(), f);
+    const key = normalizeFeatureName(f.name);
+    featureMap.set(key, f);
   }
 
   // 添加新功能
   const newFeatures = newResult.features || [];
   for (const f of newFeatures) {
-    const key = f.name.toLowerCase();
-    if (featureMap.has(key)) {
-      // 已存在，合并来源并增加计数
-      const existingFeature = featureMap.get(key)!;
-      existingFeature.count = (existingFeature.count || 1) + 1;
-      // 合并来源 URL
-      const existingSources = new Set(existingFeature.sources || []);
-      for (const src of (f.sources || [])) {
-        existingSources.add(src);
+    const normalizedName = normalizeFeatureName(f.name);
+
+    // 尝试查找相似名称的功能
+    let merged = false;
+    for (const [existingKey, existingFeature] of featureMap) {
+      if (isSimilarFeatureName(f.name, existingFeature.name)) {
+        // 找到相似的，合并
+        existingFeature.count = (existingFeature.count || 1) + (f.count || 1);
+
+        // 合并来源 URL
+        const existingSources = new Set(existingFeature.sources || []);
+        for (const src of (f.sources || [])) {
+          existingSources.add(src);
+        }
+        existingFeature.sources = Array.from(existingSources);
+
+        // 选择更好的描述
+        existingFeature.description = selectBetterDescription(
+          existingFeature.description,
+          f.description || ''
+        );
+
+        // 保留更完整的名称
+        if (f.name.length > existingFeature.name.length) {
+          existingFeature.name = f.name;
+        }
+
+        merged = true;
+        break;
       }
-      existingFeature.sources = Array.from(existingSources);
-    } else {
-      // 新功能
-      featureMap.set(key, f);
+    }
+
+    // 如果没有找到相似的，添加新功能
+    if (!merged) {
+      featureMap.set(normalizedName, {
+        name: f.name,
+        count: f.count || 1,
+        sources: f.sources || [],
+        description: f.description || '',
+      });
     }
   }
 
