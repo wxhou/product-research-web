@@ -18,7 +18,7 @@ import { updateProgress } from '../../progress/tracker';
 import { createCancelCheck } from '../../cancellation/handler';
 import { getFileStorageService, type FileStorageService } from '@/lib/file-storage';
 import { jsonrepair } from 'jsonrepair';
-import { createQualityAssessor } from '../quantitative/quality-assessor';
+import { createQualityAssessor } from './quantitative/quality-assessor';
 
 /**
  * Analyzer Agent 配置

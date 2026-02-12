@@ -220,10 +220,14 @@ async function generateSearchPlan(
       }
     }
 
-    // 如果以上都失败，直接用 jsonrepair 处理
+    // 如果以上都失败，先清理 markdown 代码块标记再尝试
     if (!parseSuccess) {
+      // 预处理：清理 markdown 代码块标记
+      const cleanedText = responseText
+        .replace(/```json\s*/g, '')
+        .replace(/```/g, '');
       try {
-        response = JSON.parse(jsonrepair(responseText));
+        response = JSON.parse(jsonrepair(cleanedText));
       } catch (finalError) {
         throw new Error(`无法解析 LLM 响应为 JSON: ${(finalError as Error).message}`);
       }
