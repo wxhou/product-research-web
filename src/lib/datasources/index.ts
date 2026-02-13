@@ -39,7 +39,7 @@ export type DataSourceType =
   | 'rss-hackernews' | 'rss-techcrunch' | 'rss-theverge' | 'rss-wired' | 'rss-producthunt'
   | 'rss-cnblogs' | 'rss-juejin' | 'rss-googlenews' | 'rss-mittechreview'
   // 免费搜索
-  | 'brave' | 'duckduckgo' | 'bing'
+  | 'searxng' | 'brave' | 'duckduckgo' | 'bing'
   // 新闻 API
   | 'newsapi' | 'gnews'
   // GitHub
@@ -218,6 +218,42 @@ async function fetchWithRetry(
   }
 
   throw lastError;
+}
+
+// ==================== SearXNG 搜索（本地部署）====================
+
+class SearXNGService implements SearchService {
+  name = 'SearXNG';
+  type = 'searxng' as DataSourceType;
+  private baseUrl = 'http://192.168.0.125:18888';
+
+  async search(query: string, limit = 10): Promise<SearchResult[]> {
+    try {
+      const url = `${this.baseUrl}/search?q=${encodeURIComponent(query)}&format=json&engines=google,bing,brave,duckduckgo`;
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (!res.ok) {
+        console.warn(`SearXNG search error: ${res.status}`);
+        return [];
+      }
+
+      const data = await res.json();
+      const results = (data.results || []).slice(0, limit).map((item: any) => ({
+        title: item.title || query,
+        url: item.url || '',
+        content: item.content || item.title || '',
+        source: item.engine || 'searxng',
+        publishedAt: item.publishedDate || undefined,
+      }));
+
+      return results;
+    } catch (error) {
+      console.error('SearXNG search failed:', error);
+      return [];
+    }
+  }
 }
 
 class DuckDuckGoService implements SearchService {
@@ -943,11 +979,10 @@ interface SearchService {
 export class DataSourceManager {
   private services: Map<DataSourceType, SearchService> = new Map();
   private enabledSources: Set<DataSourceType> = new Set([
-    // 全部免费数据源默认启用（已移除 github，因为其搜索结果噪音大）
-    'rss-hackernews', 'rss-techcrunch', 'rss-theverge', 'rss-wired', 'rss-producthunt',
-    'rss-googlenews', 'rss-mittechreview',
-    'rss-cnblogs', 'rss-juejin',
-    'duckduckgo', 'reddit', 'hackernews-api', 'v2ex',
+    // 核心数据源
+    'searxng', 'hackernews-api',
+    'rss-hackernews', 'rss-techcrunch', 'rss-wired', 'rss-producthunt',
+    'rss-cnblogs',
   ]);
 
   constructor() {
@@ -963,6 +998,7 @@ export class DataSourceManager {
     this.services.set('rss-juejin', new RSSService());
 
     // 注册其他服务
+    this.services.set('searxng', new SearXNGService());
     this.services.set('brave', new BraveSearchService());
     this.services.set('duckduckgo', new DuckDuckGoService());
     this.services.set('bing', new BingSearchService());
@@ -1006,33 +1042,19 @@ export class DataSourceManager {
 
   getAllSources(): Array<{ type: DataSourceType; name: string; enabled: boolean; description: string; free: boolean }> {
     return [
-      // RSS 订阅（全部免费）
+      // 搜索引擎
+      { type: 'searxng', name: 'SearXNG', enabled: this.isEnabled('searxng'), description: '本地搜索聚合引擎', free: true },
+      // RSS 订阅
       { type: 'rss-hackernews', name: 'Hacker News', enabled: this.isEnabled('rss-hackernews'), description: '技术社区新闻', free: true },
       { type: 'rss-techcrunch', name: 'TechCrunch', enabled: this.isEnabled('rss-techcrunch'), description: '科技新闻报道', free: true },
-      { type: 'rss-theverge', name: 'The Verge', enabled: this.isEnabled('rss-theverge'), description: '科技和娱乐新闻', free: true },
       { type: 'rss-wired', name: 'Wired', enabled: this.isEnabled('rss-wired'), description: '深度科技报道', free: true },
       { type: 'rss-producthunt', name: 'Product Hunt', enabled: this.isEnabled('rss-producthunt'), description: '新产品发布', free: true },
-      { type: 'rss-googlenews', name: 'Google News AI', enabled: this.isEnabled('rss-googlenews'), description: 'AI 技术新闻', free: true },
-      { type: 'rss-mittechreview', name: 'MIT Tech Review', enabled: this.isEnabled('rss-mittechreview'), description: '麻省理工科技评论', free: true },
       // 国内 RSS
       { type: 'rss-cnblogs', name: '博客园', enabled: this.isEnabled('rss-cnblogs'), description: '国内开发者社区', free: true },
-      { type: 'rss-juejin', name: '掘金', enabled: this.isEnabled('rss-juejin'), description: '掘金技术社区', free: true },
-      // 免费搜索
-      { type: 'duckduckgo', name: 'DuckDuckGo', enabled: this.isEnabled('duckduckgo'), description: '免费搜索引擎', free: true },
-      { type: 'brave', name: 'Brave Search', enabled: this.isEnabled('brave'), description: '需要 API Key', free: false },
-      { type: 'bing', name: 'Bing Search', enabled: this.isEnabled('bing'), description: '需要 API Key', free: false },
-      // 新闻 API
-      { type: 'newsapi', name: 'NewsAPI', enabled: this.isEnabled('newsapi'), description: '需要 API Key (免费额度)', free: false },
-      { type: 'gnews', name: 'GNews', enabled: this.isEnabled('gnews'), description: '需要 API Key', free: false },
-      // GitHub
-      { type: 'github', name: 'GitHub', enabled: this.isEnabled('github'), description: '开源项目搜索', free: true },
-      // 国际技术社区
-      { type: 'reddit', name: 'Reddit', enabled: this.isEnabled('reddit'), description: '技术社区讨论', free: true },
+      // 技术社区 API
       { type: 'hackernews-api', name: 'Hacker News API', enabled: this.isEnabled('hackernews-api'), description: '官方 API 搜索', free: true },
-      // 国内技术社区
-      { type: 'v2ex', name: 'V2EX', enabled: this.isEnabled('v2ex'), description: '国内程序员社区', free: true },
       // 全文爬取
-      { type: 'crawl4ai', name: 'Crawl4AI', enabled: this.isEnabled('crawl4ai'), description: '网页全文爬取（需要启动 Crawl4AI 服务）', free: true },
+      { type: 'crawl4ai', name: 'Crawl4AI', enabled: this.isEnabled('crawl4ai'), description: '网页全文爬取', free: true },
     ];
   }
 

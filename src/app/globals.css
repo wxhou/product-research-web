@@ -2638,11 +2638,12 @@ html[data-theme="dark"] .theme-toggle .moon-icon {
 .report-page {
   max-width: 900px;
   margin: 0 auto;
-  padding: 2rem 1.5rem 4rem;
+  padding: 5.5rem 1.5rem 4rem;
 }
 
 .report-page .page-header {
   margin-bottom: 2rem;
+  padding-top: 0.5rem;
 }
 
 .report-page .back-link {
@@ -2928,6 +2929,43 @@ html[data-theme="dark"] .theme-toggle .moon-icon {
   background: transparent;
   border: none;
   color: inherit;
+}
+
+/* 代码块复制按钮 */
+.code-block-wrapper {
+  position: relative;
+  margin: 1rem 0;
+}
+
+.code-block-wrapper .code-pre {
+  padding-top: 2.5rem;
+}
+
+.code-copy-btn {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  color: #8b949e;
+  cursor: pointer;
+  transition: all 0.2s;
+  z-index: 10;
+}
+
+.code-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #c9d1d9;
+}
+
+.code-copy-btn:active {
+  transform: scale(0.95);
 }
 
 /* 设置页样式 */
@@ -3959,4 +3997,167 @@ html[data-theme="dark"] .log-entry {
 
 html[data-theme="dark"] .log-empty {
   color: var(--foreground-muted);
+}
+
+/* ========================================
+   打印样式优化
+   ======================================== */
+
+@media print {
+  /* 页面设置 */
+  @page {
+    margin: 2cm;
+    size: A4;
+  }
+
+  /* 基础打印样式 */
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 12pt;
+    line-height: 1.5;
+  }
+
+  /* 隐藏不需要打印的元素 */
+  .toc-sidebar,
+  .breadcrumb-nav,
+  .reading-progress,
+  .chart-modal-overlay,
+  .no-print {
+    display: none !important;
+  }
+
+  /* 报告页打印样式 */
+  .report-page {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .report-page .page-header {
+    margin-bottom: 1.5rem;
+  }
+
+  .report-page h1 {
+    font-size: 24pt;
+  }
+
+  .report-page h2 {
+    font-size: 18pt;
+    page-break-after: avoid;
+    margin-top: 1.5rem;
+  }
+
+  .report-page h3,
+  .report-page h4 {
+    font-size: 14pt;
+    page-break-after: avoid;
+  }
+
+  /* 图表打印样式 */
+  .mermaid-chart,
+  pre.mermaid,
+  div.mermaid {
+    page-break-inside: avoid;
+    max-width: 100% !important;
+    overflow: visible;
+  }
+
+  .mermaid-chart svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  /* 表格打印样式 */
+  .table-wrapper {
+    page-break-inside: avoid;
+  }
+
+  table {
+    font-size: 10pt;
+    border-collapse: collapse;
+    width: 100%;
+  }
+
+  table th,
+  table td {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+  }
+
+  table th {
+    background: #f5f5f5 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  table tr:nth-child(even) {
+    background: #fafafa !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* 代码块打印样式 */
+  pre,
+  code {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-size: 10pt;
+  }
+
+  pre.code-pre {
+    border: 1px solid #ddd;
+    background: #f5f5f5 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* 链接打印样式 - 显示 URL */
+  a[href]:after {
+    content: " (" attr(href) ")";
+    font-size: 9pt;
+    color: #666;
+  }
+
+  a[href^="#"]:after,
+  a[href^="javascript"]:after {
+    content: "";
+  }
+
+  /* 图片打印样式 */
+  img {
+    max-width: 100% !important;
+    page-break-inside: avoid;
+  }
+
+  /* 分页控制 */
+  h1, h2, h3, h4, h5, h6 {
+    page-break-after: avoid;
+  }
+
+  pre, blockquote, table, figure {
+    page-break-inside: avoid;
+  }
+
+  /* 列表打印样式 */
+  ul, ol {
+    page-break-inside: avoid;
+  }
+
+  /* 避免孤儿标题 */
+  h2, h3 {
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* 页眉页脚 */
+  @page :first {
+    margin-top: 3cm;
+  }
+
+  /* 确保背景色打印 */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
 }
