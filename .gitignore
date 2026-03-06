@@ -13,9 +13,10 @@
 # testing
 /coverage
 
-# next.js
-/.next/
-/out/
+# next.js (web directory)
+/web/.next/
+/web/out/
+/web/build/
 
 # production
 /build
@@ -38,11 +39,13 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+web/*.tsbuildinfo
 next-env.d.ts
+web/next-env.d.ts
 
 # task data (persisted research data)
 task-data/
 data/research.db
 **/CLAUDE.md
-**/CLAUDE.md
-openspec/changes/archive/
+.claude/
+openspec

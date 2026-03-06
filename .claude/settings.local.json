@@ -69,7 +69,13 @@
       "Bash(git checkout:*)",
       "Bash(npx openspec show:*)",
       "Bash(npx openspec archive enhance-report-executability --yes)",
-      "Bash(npx openspec archive enhance-report-executability:*)"
+      "Bash(npx openspec archive enhance-report-executability:*)",
+      "Bash(openspec new:*)",
+      "Bash(npx openspec:*)",
+      "Bash(mv:*)",
+      "Bash(node:*)",
+      "mcp__chrome-devtools__handle_dialog",
+      "Bash(cp:*)"
     ]
   }
 }
