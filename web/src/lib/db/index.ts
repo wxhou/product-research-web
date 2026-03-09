@@ -117,6 +117,18 @@ function initDatabase() {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
 
+      -- 检查点表（用于数据质量驱动重启）
+      CREATE TABLE IF NOT EXISTS checkpoints (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        retry_count INTEGER DEFAULT 0,
+        reason TEXT,
+        state_snapshot TEXT NOT NULL,
+        quality_metrics TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );
+
       -- 创建索引
       CREATE INDEX IF NOT EXISTS idx_projects_user ON projects(user_id);
       CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
@@ -127,6 +139,8 @@ function initDatabase() {
       CREATE INDEX IF NOT EXISTS idx_data_sources_active ON data_sources(is_active);
       CREATE INDEX IF NOT EXISTS idx_research_tasks_status ON research_tasks(status);
       CREATE INDEX IF NOT EXISTS idx_research_tasks_user ON research_tasks(user_id);
+      CREATE INDEX IF NOT EXISTS idx_checkpoints_project ON checkpoints(project_id);
+      CREATE INDEX IF NOT EXISTS idx_checkpoints_created ON checkpoints(created_at);
     `);
   } else {
     // 迁移现有数据库
@@ -295,6 +309,30 @@ function initDatabase() {
         `);
       } catch (e) {
         console.error('Failed to create research_phases table:', e);
+      }
+    }
+
+    // 迁移：检查点表
+    const hasCheckpoints = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='checkpoints'").get();
+    if (!hasCheckpoints) {
+      try {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS checkpoints (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            retry_count INTEGER DEFAULT 0,
+            reason TEXT,
+            state_snapshot TEXT NOT NULL,
+            quality_metrics TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+          );
+
+          CREATE INDEX IF NOT EXISTS idx_checkpoints_project ON checkpoints(project_id);
+          CREATE INDEX IF NOT EXISTS idx_checkpoints_created ON checkpoints(created_at);
+        `);
+      } catch (e) {
+        console.error('Failed to create checkpoints table:', e);
       }
     }
 
@@ -618,6 +656,23 @@ export const dataSourceDb = {
       config = @config,
       is_active = @is_active
     WHERE id = @id
+  `),
+};
+
+// 检查点操作
+export const checkpointDb = {
+  saveCheckpoint: db.prepare(`
+    INSERT INTO checkpoints (id, project_id, retry_count, reason, state_snapshot, quality_metrics, created_at)
+    VALUES (@id, @project_id, @retry_count, @reason, @state_snapshot, @quality_metrics, @created_at)
+  `),
+  getCheckpoints: db.prepare(`
+    SELECT id, project_id, retry_count, reason, state_snapshot, quality_metrics, created_at
+    FROM checkpoints
+    WHERE project_id = @project_id
+    ORDER BY created_at DESC
+  `),
+  deleteCheckpoints: db.prepare(`
+    DELETE FROM checkpoints WHERE project_id = @project_id
   `),
 };
 

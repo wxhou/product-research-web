@@ -15,6 +15,10 @@ import type {
   Citation,
   ProgressDetail,
   SearchPlan,
+  SearchIteration,
+  QualityMetrics,
+  QualityCheckpoint,
+  FailurePattern,
 } from './types';
 import { RESEARCH_QUALITY_THRESHOLDS } from './config/defaults';
 
@@ -95,6 +99,9 @@ export interface ResearchState {
   searchResults: SearchResult[];
   pendingQueries: SearchQuery[];
 
+  // 搜索迭代状态（多轮搜索）
+  searchIteration?: SearchIteration;
+
   // 提取阶段产物
   extractedContent: ExtractionResult[];
 
@@ -123,6 +130,13 @@ export interface ResearchState {
   // 重试计数
   retryCount: number;
   maxRetries: number;
+
+  // 质量评估（数据质量驱动重启机制）
+  qualityMetrics?: QualityMetrics;
+  checkpointId?: string;
+  lastCheckpointAt?: string;
+  checkpointHistory?: QualityCheckpoint[];
+  failurePatterns?: FailurePattern[];
 }
 
 // ============================================================
@@ -151,6 +165,15 @@ export function createInitialState(
     progressMessage: '等待开始',
     searchResults: [],
     pendingQueries: [],
+    searchIteration: {
+      currentRound: 1,
+      maxRounds: 3,
+      coveredDimensions: [],
+      missingDimensions: [],
+      roundResults: [],
+      totalQueries: 0,
+      totalResults: 0,
+    },
     extractedContent: [],
     citations: [],
     iterationsUsed: 0,
@@ -158,6 +181,8 @@ export function createInitialState(
     totalResults: 0,
     retryCount: 0,
     maxRetries: 3,
+    checkpointHistory: [],
+    failurePatterns: [],
     startedAt: now,
     updatedAt: now,
   };
@@ -344,3 +369,108 @@ export function updateCancellationState(
     updatedAt: new Date().toISOString(),
   };
 }
+
+// ============================================================
+// 检查点系统 (数据质量驱动重启)
+// ============================================================
+
+/**
+ * 保存检查点
+ */
+export function saveCheckpoint(
+  state: ResearchState,
+  reason?: string
+): QualityCheckpoint {
+  const checkpoint: QualityCheckpoint = {
+    id: `cp-${Date.now()}`,
+    timestamp: new Date().toISOString(),
+    stateSnapshot: { ...state },
+    qualityMetrics: state.qualityMetrics!,
+    retryCount: state.retryCount,
+    reason,
+  };
+
+  // 更新状态
+  state.checkpointId = checkpoint.id;
+  state.lastCheckpointAt = checkpoint.timestamp;
+
+  // 添加到历史（保留最近10个）
+  if (!state.checkpointHistory) {
+    state.checkpointHistory = [];
+  }
+  state.checkpointHistory.push(checkpoint);
+  if (state.checkpointHistory.length > 10) {
+    state.checkpointHistory.shift();
+  }
+
+  return checkpoint;
+}
+
+/**
+ * 恢复检查点
+ */
+export function restoreCheckpoint(
+  state: ResearchState,
+  checkpointId: string
+): ResearchState | null {
+  const checkpoint = state.checkpointHistory?.find(cp => cp.id === checkpointId);
+  if (!checkpoint) {
+    console.warn(`[State] 检查点不存在: ${checkpointId}`);
+    return null;
+  }
+
+  // 恢复状态
+  return {
+    ...checkpoint.stateSnapshot,
+    checkpointId: checkpoint.id,
+    lastCheckpointAt: checkpoint.timestamp,
+    checkpointHistory: state.checkpointHistory,
+    failurePatterns: state.failurePatterns,
+  };
+}
+
+/**
+ * 获取检查点历史
+ */
+export function getCheckpointHistory(
+  state: ResearchState
+): QualityCheckpoint[] {
+  return state.checkpointHistory || [];
+}
+
+/**
+ * 记录失败模式
+ */
+export function recordFailurePattern(
+  state: ResearchState,
+  reason: string
+): void {
+  if (!state.failurePatterns) {
+    state.failurePatterns = [];
+  }
+
+  const existing = state.failurePatterns.find(fp => fp.reason === reason);
+  if (existing) {
+    existing.count += 1;
+    existing.lastOccurrence = new Date().toISOString();
+  } else {
+    state.failurePatterns.push({
+      reason,
+      count: 1,
+      lastOccurrence: new Date().toISOString(),
+    });
+  }
+}
+
+/**
+ * 检测连续失败
+ */
+export function detectConsecutiveFailures(
+  state: ResearchState,
+  threshold: number = 3
+): FailurePattern[] {
+  return (state.failurePatterns || []).filter(fp => fp.count >= threshold);
+}
+
+// 检查点持久化
+export * from './state/checkpoint-persistence';

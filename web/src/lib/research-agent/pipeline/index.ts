@@ -61,35 +61,65 @@ export function createPipeline(config: PipelineConfig): {
     async execute(initialState: ResearchState): Promise<PipelineResult> {
       let currentState = initialState;
       let executedStages = 0;
+      let maxRetries = 10; // 最大重试次数
+      let retryCount = 0;
 
       console.log(`[Pipeline] Starting execution with ${stages.length} stages`);
 
       try {
-        for (const stage of stages) {
-          console.log(`[Pipeline] Executing stage: ${stage.name}`);
+        // 重试循环
+        while (retryCount <= maxRetries) {
+          for (const stage of stages) {
+            console.log(`[Pipeline] Executing stage: ${stage.name}`);
 
-          // 更新当前阶段
-          currentState.currentStep = stage.name;
-          currentState.progressMessage = `正在执行 ${stage.name}...`;
+            // 更新当前阶段
+            currentState.currentStep = stage.name;
+            currentState.progressMessage = `正在执行 ${stage.name}...`;
 
-          // 执行阶段（带超时）
-          const stagePromise = stage.execute(currentState);
+            // 执行阶段（带超时）
+            const stagePromise = stage.execute(currentState);
 
-          if (stageTimeout > 0) {
-            const timeoutPromise = new Promise<never>((_, reject) => {
-              setTimeout(() => reject(new Error(`Stage ${stage.name} timed out`)), stageTimeout);
-            });
+            if (stageTimeout > 0) {
+              const timeoutPromise = new Promise<never>((_, reject) => {
+                setTimeout(() => reject(new Error(`Stage ${stage.name} timed out`)), stageTimeout);
+              });
 
-            currentState = await Promise.race([stagePromise, timeoutPromise]);
-          } else {
-            currentState = await stagePromise;
+              currentState = await Promise.race([stagePromise, timeoutPromise]);
+            } else {
+              currentState = await stagePromise;
+            }
+
+            executedStages++;
+
+            // 检查是否完成
+            if (currentState.status === 'completed' || currentState.status === 'failed') {
+              console.log(`[Pipeline] Early termination at stage ${stage.name}, status: ${currentState.status}`);
+              return {
+                finalState: currentState,
+                executedStages,
+                success: currentState.status === 'completed',
+              };
+            }
+
+            // 检查是否需要重启（pending 状态且 currentStep 为 planner）
+            if (currentState.status === 'pending' && currentState.currentStep === 'planner') {
+              console.log(`[Pipeline] Restart triggered at stage ${stage.name}, retry count: ${retryCount + 1}`);
+              retryCount++;
+              // 跳出内层循环，重新从 planner 开始
+              break;
+            }
           }
 
-          executedStages++;
+          // 如果所有阶段都完成且状态不是 pending，跳出重试循环
+          if (currentState.status !== 'pending') {
+            break;
+          }
 
-          // 检查是否完成
-          if (currentState.status === 'completed' || currentState.status === 'failed') {
-            console.log(`[Pipeline] Early termination at stage ${stage.name}, status: ${currentState.status}`);
+          // 防止无限循环
+          if (retryCount >= maxRetries) {
+            console.warn(`[Pipeline] Max retries (${maxRetries}) reached`);
+            currentState.status = 'failed';
+            currentState.progressMessage = `超过最大重试次数 (${maxRetries})`;
             break;
           }
         }

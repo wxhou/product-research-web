@@ -48,4 +48,6 @@ task-data/
 data/research.db
 **/CLAUDE.md
 .claude/
-openspec
+.vscode/
+openspec/
+scripts/

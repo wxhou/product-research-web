@@ -23,6 +23,7 @@ import { generateText } from '../../../llm';
 import { updateProgress } from '../../progress/tracker';
 import { createCancelCheck } from '../../cancellation/handler';
 import { getFileStorageService } from '@/lib/file-storage';
+import { createIterativeRefiner, type IterationConfig } from './iterative-refiner';
 
 /**
  * Reporter Agent 配置
@@ -32,11 +33,31 @@ export interface ReporterConfig {
   title?: string;
   /** 最大重试次数 */
   maxRetries?: number;
+  /** 是否启用迭代优化 */
+  enableIteration?: boolean;
+  /** 迭代优化配置 */
+  iterationConfig?: {
+    /** 最大迭代次数，默认 3 */
+    maxIterations?: number;
+    /** 通过阈值，默认 75 */
+    passThreshold?: number;
+    /** 警告阈值，默认 60 */
+    warnThreshold?: number;
+    /** 最小收益，默认 5 */
+    minImprovement?: number;
+  };
 }
 
 /** 默认配置 */
 const DEFAULT_CONFIG: ReporterConfig = {
   maxRetries: 3,
+  enableIteration: false,
+  iterationConfig: {
+    maxIterations: 3,
+    passThreshold: 75,
+    warnThreshold: 60,
+    minImprovement: 5,
+  },
 };
 
 /**
@@ -48,6 +69,13 @@ export interface ReporterResult {
   reportPath?: string;
   metadata?: ReportMetadata;
   error?: string;
+  /** 迭代优化相关信息 */
+  iterationInfo?: {
+    iterationsUsed: number;
+    finalQualityScore: number;
+    totalTokens: number;
+    estimatedCost: number;
+  };
 }
 
 /**
@@ -88,12 +116,19 @@ async function executeReport(
   const isCancelled = createCancelCheck(projectId);
   const maxRetries = config.maxRetries ?? 3;
 
+  // 计算总步骤数
+  const baseSteps = shouldUseTwoStage(analysis) ? 3 : 2;
+  const iterationSteps = (config.enableIteration && config.iterationConfig?.maxIterations)
+    ? config.iterationConfig.maxIterations + 1
+    : 0;
+  const totalSteps = baseSteps + iterationSteps;
+
   try {
     // 更新进度
     await updateProgress(projectId, {
       stage: 'reporting',
       step: '准备报告数据',
-      totalItems: shouldUseTwoStage(analysis) ? 3 : 2,
+      totalItems: totalSteps,
       completedItems: 0,
       currentItem: '整理分析结果',
     });
@@ -135,12 +170,54 @@ async function executeReport(
       };
     }
 
+    // 迭代优化（如果启用）
+    let iterationInfo: ReporterResult['iterationInfo'];
+    if (config.enableIteration && config.iterationConfig?.maxIterations && config.iterationConfig.maxIterations > 0) {
+      await updateProgress(projectId, {
+        stage: 'reporting',
+        step: '迭代优化',
+        totalItems: config.iterationConfig.maxIterations + 1,
+        completedItems: 0,
+        currentItem: '开始迭代优化',
+      });
+
+      const iterativeRefiner = createIterativeRefiner();
+      const iterationConfig: IterationConfig = {
+        maxIterations: config.iterationConfig.maxIterations,
+        passThreshold: config.iterationConfig.passThreshold,
+        warnThreshold: config.iterationConfig.warnThreshold,
+        minImprovement: config.iterationConfig.minImprovement,
+      };
+
+      try {
+        const iterationResult = await iterativeRefiner.refine({
+          state,
+          initialReport: fullReport,
+          config: iterationConfig,
+        });
+
+        fullReport = iterationResult.finalReport;
+        iterationInfo = {
+          iterationsUsed: iterationResult.iterationsUsed,
+          finalQualityScore: iterationResult.qualityResult.overallScore,
+          totalTokens: iterationResult.costInfo.totalTokens,
+          estimatedCost: iterationResult.costInfo.estimatedCost,
+        };
+
+        console.log(`[Reporter] 迭代优化完成: ${iterationResult.iterationsUsed} 次迭代, 最终评分 ${iterationResult.qualityResult.overallScore}`);
+      } catch (error) {
+        console.error('[Reporter] 迭代优化失败:', error);
+        // 迭代失败时使用原始报告
+      }
+    }
+
     // 保存报告
+    const completedBeforeSave = baseSteps - 1 + iterationSteps;
     await updateProgress(projectId, {
       stage: 'reporting',
       step: '保存报告文件',
-      totalItems: useTwoStage ? 3 : 2,
-      completedItems: useTwoStage ? 2 : 1,
+      totalItems: totalSteps,
+      completedItems: completedBeforeSave,
       currentItem: '写入文件',
     });
 
@@ -162,8 +239,8 @@ async function executeReport(
     await updateProgress(projectId, {
       stage: 'reporting',
       step: '报告生成完成',
-      totalItems: useTwoStage ? 3 : 2,
-      completedItems: useTwoStage ? 3 : 2,
+      totalItems: totalSteps,
+      completedItems: totalSteps,
       currentItem: '完成',
     });
 
@@ -179,6 +256,7 @@ async function executeReport(
         keywords,
         summary: generateSummary(fullReport),
       },
+      iterationInfo,
     };
   } catch (error) {
     return {

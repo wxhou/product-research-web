@@ -16,6 +16,7 @@ import { getJinaReaderService, type JinaReaderService } from '../../../datasourc
 import { updateProgress } from '../../progress/tracker';
 import { createCancelCheck } from '../../cancellation/handler';
 import { getFileStorageService, type FileStorageService } from '@/lib/file-storage';
+import { filterContent } from './content-filter';
 
 /**
  * Extractor Agent 配置
@@ -29,6 +30,8 @@ export interface ExtractorConfig {
   saveToFiles: boolean;
   /** 爬取超时（毫秒） */
   timeout: number;
+  /** 最小内容数量要求（质量保障） */
+  minContentCount: number;
 }
 
 /** 默认配置 */
@@ -37,6 +40,7 @@ const DEFAULT_CONFIG: ExtractorConfig = {
   skipCrawled: true,
   saveToFiles: true,
   timeout: 60000, // 60 秒
+  minContentCount: 10,
 };
 
 /**
@@ -48,7 +52,24 @@ export interface ExtractorResult {
   projectPath?: string;
   rawFileCount?: number;
   error?: string;
+  /** 数量保障信息 */
+  countGuarantee?: CountGuaranteeResult;
 }
+
+/**
+ * 数量保障结果
+ */
+export interface CountGuaranteeResult {
+  isSufficient: boolean;
+  actualCount: number;
+  requiredCount: number;
+  needMoreSearch: boolean;
+  missingCount: number;
+  nextAction: 'analyze' | 'request_more_search';
+}
+
+/** 默认最小数量要求 */
+export const DEFAULT_MIN_CONTENT_COUNT = 10;
 
 /**
  * 创建 Extractor Agent
@@ -113,11 +134,13 @@ async function executeExtract(
 
   // 如果没有待爬取的内容，返回成功（项目目录已创建）
   if (targets.length === 0) {
+    const countGuarantee = checkMinContentCount([], DEFAULT_MIN_CONTENT_COUNT);
     return {
       success: true,
       extractedContent: [],
       projectPath,
       rawFileCount: 0,
+      countGuarantee,
     };
   }
 
@@ -165,6 +188,7 @@ async function executeExtract(
     const allExtractions: ExtractionResult[] = [];
     const rawFilePaths: string[] = [];
     let successCount = 0;
+    let fileIndex = 0; // 独立的文件索引计数器，避免覆盖
 
     // 处理爬取结果
     for (let i = 0; i < crawlResults.length; i++) {
@@ -189,6 +213,18 @@ async function executeExtract(
       // 记录清理效果
       if (cleaned.length < markdownContent.length * 0.5) {
         console.log(`[Extractor] 内容清理: ${markdownContent.length} → ${cleaned.length} 字符 (减少 ${Math.round((1 - cleaned.length / markdownContent.length) * 100)}%)`);
+      }
+
+      // 内容相关性过滤
+      const filterResult = await filterContent({
+        url: result.url,
+        rawContent: cleaned,
+        targetIndustry: state.title, // 使用产品名称作为行业关键词
+      });
+
+      if (!filterResult.isRelevant) {
+        console.log(`[Extractor] 过滤低质量内容: ${filterResult.issues.join(', ')}`);
+        continue;
       }
 
       // 压缩内容
@@ -217,7 +253,8 @@ async function executeExtract(
 
       // 保存到文件
       if (config.saveToFiles) {
-        const saveResult = fileService.saveRawFile(projectPath, i + 1, compressed || result.markdown, {
+        const fileId = fileIndex + 1; // 使用独立的文件索引
+        const saveResult = fileService.saveRawFile(projectPath, fileId, compressed || result.markdown, {
           url: result.url,
           title: extraction.title,
           source: originalResult.source,
@@ -230,6 +267,7 @@ async function executeExtract(
       }
 
       successCount++;
+      fileIndex++; // 只有成功处理后才递增索引
 
       // 检查取消
       if (isCancelled()) {
@@ -256,11 +294,17 @@ async function executeExtract(
     const masterContent = fileService.generateMasterFile(projectPath);
     fileService.saveAnalysisFile(projectPath, 'summary', masterContent, '项目索引');
 
+    // 数量保障检查
+    const countGuarantee = checkMinContentCount(allExtractions, DEFAULT_MIN_CONTENT_COUNT);
+
+    console.log(`[Extractor] 数量保障检查: ${countGuarantee.actualCount}/${countGuarantee.requiredCount}, 建议: ${countGuarantee.nextAction}`);
+
     return {
       success: true,
       extractedContent: allExtractions,
       projectPath,
       rawFileCount: successCount,
+      countGuarantee,
     };
   } catch (error) {
     return {
@@ -269,6 +313,28 @@ async function executeExtract(
       projectPath,
     };
   }
+}
+
+/**
+ * 检查最小内容数量
+ *
+ * 确保 extractor 保存的高质量内容数量 >= 最低要求
+ */
+export function checkMinContentCount(
+  extractedContent: ExtractionResult[],
+  minCount: number = DEFAULT_MIN_CONTENT_COUNT
+): CountGuaranteeResult {
+  const actualCount = extractedContent.length;
+  const isSufficient = actualCount >= minCount;
+
+  return {
+    isSufficient,
+    actualCount,
+    requiredCount: minCount,
+    needMoreSearch: !isSufficient,
+    missingCount: Math.max(0, minCount - actualCount),
+    nextAction: isSufficient ? 'analyze' : 'request_more_search',
+  };
 }
 
 /**

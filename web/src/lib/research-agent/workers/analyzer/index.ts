@@ -11,13 +11,14 @@
  */
 
 import type { ResearchState } from '../../state';
-import type { AnalysisResult } from '../../types';
+import type { AnalysisResult, QualityMetrics } from '../../types';
 import { createPhaseController } from '../../prompts/analyzer/phase-controller';
 import { getLLMConfig } from '../../../llm';
 import { updateProgress } from '../../progress/tracker';
 import { createCancelCheck } from '../../cancellation/handler';
 import { getFileStorageService, type FileStorageService } from '@/lib/file-storage';
 import { createQualityAssessor } from './quantitative/quality-assessor';
+import { evaluateQuality, qualityGateDecision } from '../../quality/scorer';
 
 /**
  * 安全地将 LLM 返回的值转换为字符串
@@ -91,6 +92,8 @@ export interface AnalyzerResult {
     missingDimensions: string[];
   };
   analysisFiles?: string[];
+  qualityMetrics?: QualityMetrics;
+  shouldRestart?: boolean;
   error?: string;
 }
 
@@ -309,10 +312,32 @@ async function executePhaseAnalysis(
     currentItem: '完成',
   });
 
+  // 执行质量门禁检查
+  const qualityMetrics = evaluateQuality(
+    state.searchResults || [],
+    state.extractedContent || [],
+    analysis,
+    state.title,
+    state.searchPlan?.researchDimensions || []
+  );
+
+  const gateResult = qualityGateDecision(qualityMetrics.overallScore);
+
+  console.log(`[Analyzer] 质量门禁结果: ${gateResult.action} (评分: ${qualityMetrics.overallScore})`);
+
+  if (gateResult.shouldWarn) {
+    console.warn(`[Analyzer] 质量警告: ${gateResult.reason}`);
+  }
+
+  // 将质量指标保存到状态
+  (state as any).qualityMetrics = qualityMetrics;
+
   return {
     success: true,
     analysis,
     analysisFiles,
+    qualityMetrics,
+    shouldRestart: gateResult.action === 'restart',
   };
 }
 

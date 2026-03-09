@@ -5,6 +5,7 @@
  */
 
 import type { SearchResult as BaseSearchResult, DataSourceType as BaseDataSourceType } from '@/lib/datasources';
+import type { ResearchState } from './state';
 
 // ============================================================
 // 核心类型
@@ -483,6 +484,13 @@ export interface ReportMetadata {
   generatedAt: string;
   keywords: string[];
   summary: string;
+  /** 迭代优化信息 */
+  iterationInfo?: {
+    iterationsUsed: number;
+    finalQualityScore: number;
+    totalTokens: number;
+    estimatedCost: number;
+  };
 }
 
 // ============================================================
@@ -591,6 +599,13 @@ export interface ProgressDetail {
   currentItem: string; // 当前处理的项目
   percentage: number; // 总体进度百分比
   estimatedTimeRemaining?: number; // 预计剩余时间（秒）
+
+  // 质量评估相关（数据质量驱动重启）
+  qualityScore?: number; // 当前质量评分 0-100
+  retryCount?: number; // 当前重试次数
+  isRetrying?: boolean; // 是否正在重试
+  restartReason?: string; // 重启原因
+  warning?: string; // 警告信息（如连续失败、成本预警）
 }
 
 /** 进度状态 */
@@ -641,4 +656,69 @@ export interface BackupManifest {
   size: number; // 文件大小
 }
 
-export type { ResearchState } from './state';
+/** 单轮搜索结果 */
+export interface RoundResult {
+  round: number;
+  queryCount: number;
+  resultCount: number;
+  highQualityCount: number; // 质量 >= 7 的结果数
+  lowQualityCount: number; // 质量 < 4 的结果数
+  dimensionsCovered: string[];
+  qualityScore: number;
+}
+
+/** 搜索迭代状态 */
+export interface SearchIteration {
+  currentRound: number; // 当前轮次 (1-3)
+  maxRounds: number; // 最大轮次
+  coveredDimensions: string[]; // 已覆盖维度
+  missingDimensions: string[]; // 缺失维度
+  roundResults: RoundResult[]; // 每轮结果
+  totalQueries: number; // 总查询数
+  totalResults: number; // 总结果数
+}
+
+// ============================================================
+// 质量评估相关
+// ============================================================
+
+/** 质量指标 */
+export interface QualityMetrics {
+  overallScore: number;           // 综合质量分 0-100
+  completeness: number;           // 完整性评分 0-100
+  credibility: number;            // 可信度评分 0-100
+  relevance: number;              // 相关性评分 0-100
+  dimensionScores: {              // 各维度评分
+    completeness: number;
+    credibility: number;
+    relevance: number;
+  };
+  issues: string[];              // 发现的问题
+  suggestions: string[];          // 改进建议
+  calculatedAt: string;           // 计算时间
+}
+
+/** 质量检查点（数据质量驱动重启机制） */
+export interface QualityCheckpoint {
+  id: string;
+  timestamp: string;
+  stateSnapshot: ResearchState;   // 状态快照
+  qualityMetrics: QualityMetrics;  // 质量指标
+  retryCount: number;             // 当前重试次数
+  reason?: string;                // 创建原因
+}
+
+/** 失败模式 */
+export interface FailurePattern {
+  reason: string;
+  count: number;
+  lastOccurrence: string;
+}
+
+/** 重试成本预警 */
+export interface CostWarning {
+  retryCount: number;
+  estimatedTokens: number;
+  estimatedCost: number;
+  warningMessage: string;
+}

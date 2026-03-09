@@ -22,6 +22,7 @@ import {
 import { generateText, getLLMConfig } from '../../../llm';
 import { updateProgress } from '../../progress/tracker';
 import { jsonrepair } from 'jsonrepair';
+import { detectIndustry, getIndustryDimensions } from './industry-detector';
 
 /**
  * Planner Agent 配置
@@ -113,8 +114,23 @@ async function planResearch(
       currentItem: 'LLM 生成中...',
     });
 
-    // 使用 LLM 生成计划
-    const searchPlan = await generateSearchPlan(title, description, keywords, config.defaultSources);
+    // 1. 首先进行行业判断
+    const industryResult = await detectIndustry({
+      title,
+      description,
+      keywords: keywords || [],
+    });
+
+    console.log(`[Planner] 行业判断: ${industryResult.detectedIndustry} (置信度: ${industryResult.confidence})`);
+
+    // 2. 使用 LLM 生成计划（传入行业信息）
+    const searchPlan = await generateSearchPlan(
+      title,
+      description,
+      keywords,
+      config.defaultSources,
+      industryResult
+    );
 
     // 更新进度
     await updateProgress(state.projectId, {
@@ -171,7 +187,14 @@ async function generateSearchPlan(
   title: string,
   description?: string,
   keywords?: string[],
-  targetSources: DataSourceType[] = DEFAULT_CONFIG.defaultSources
+  targetSources: DataSourceType[] = DEFAULT_CONFIG.defaultSources,
+  industryResult?: {
+    detectedIndustry: string;
+    confidence: number;
+    reasoning: string;
+    researchDimensions: string[];
+    relatedIndustries?: string[];
+  }
 ): Promise<SearchPlan> {
   const prompt = formatPrompt(PLAN_RESEARCH_PROMPT, { title, description });
 
@@ -179,6 +202,20 @@ async function generateSearchPlan(
   let enhancedPrompt = prompt;
   if (keywords && keywords.length > 0) {
     enhancedPrompt += `\n\n【关键词】\n${keywords.join(', ')}`;
+  }
+
+  // 添加行业判断结果
+  if (industryResult) {
+    enhancedPrompt += `\n\n【行业判断】\n`;
+    enhancedPrompt += `- 行业类别: ${industryResult.detectedIndustry}\n`;
+    enhancedPrompt += `- 置信度: ${(industryResult.confidence * 100).toFixed(0)}%\n`;
+    enhancedPrompt += `- 判断理由: ${industryResult.reasoning}\n`;
+    if (industryResult.researchDimensions.length > 0) {
+      enhancedPrompt += `- 研究维度: ${industryResult.researchDimensions.join(', ')}\n`;
+    }
+    if (industryResult.relatedIndustries && industryResult.relatedIndustries.length > 0) {
+      enhancedPrompt += `- 相关行业: ${industryResult.relatedIndustries.join(', ')}\n`;
+    }
   }
 
   // 调用 LLM 生成 JSON 响应

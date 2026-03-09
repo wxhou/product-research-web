@@ -98,6 +98,66 @@ export async function updateProgressFromState(state: ResearchState): Promise<voi
   });
 }
 
+// ============================================================
+// 重启通知
+// ============================================================
+
+/**
+ * 重启通知输入
+ */
+export interface RestartNotificationInput {
+  projectId: string;
+  retryCount: number;
+  reason: string;
+  qualityMetrics?: {
+    overallScore: number;
+    completeness: number;
+    credibility: number;
+    relevance: number;
+  };
+  warning?: string;
+  estimatedTimeRemaining?: number;
+}
+
+/**
+ * 发送重启通知
+ *
+ * 当质量不达标触发重启时，通知用户
+ */
+export async function notifyRestart(input: RestartNotificationInput): Promise<void> {
+  const { projectId, retryCount, reason, qualityMetrics, warning, estimatedTimeRemaining } = input;
+
+  const detail: ProgressDetail = {
+    stage: 'restarting',
+    step: `质量不达标，第 ${retryCount} 次重启`,
+    totalItems: 1,
+    completedItems: 0,
+    currentItem: reason,
+    percentage: 0,
+    isRetrying: true,
+    retryCount,
+    restartReason: reason,
+    qualityScore: qualityMetrics?.overallScore,
+    warning,
+    estimatedTimeRemaining,
+  };
+
+  // 保存到内存存储
+  progressStore.set(projectId, detail);
+
+  // 同步到数据库
+  await syncToDatabase(projectId, detail);
+
+  // 同步到状态文件
+  await syncToStateFile(projectId, detail);
+
+  // 通知回调
+  notifyCallbacks(projectId, detail);
+
+  // 记录日志
+  console.log(`[Progress] ${projectId}: 重启通知 - 第 ${retryCount} 次重试 - ${reason}`);
+}
+
 /**
  * 同步进度到状态文件
  */

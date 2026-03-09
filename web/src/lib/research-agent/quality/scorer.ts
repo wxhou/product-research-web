@@ -160,6 +160,348 @@ export interface QualityScorecard {
   }[];
 }
 
+// ============================================================
+// 数据质量驱动重启 - 质量评估工具
+// ============================================================
+
+import type {
+  SearchResult,
+  ExtractionResult,
+  AnalysisResult,
+  QualityMetrics,
+  DataSourceType,
+} from '../types';
+
+// 数据源可信度权重（用于搜索结果）
+// 使用 string 以兼容各种数据源类型
+const SOURCE_CREDIBILITY_WEIGHTS: Record<string, number> = {
+  // 高可信度
+  'official-docs': 1.0,
+  'government': 1.0,
+  'academic': 0.9,
+  'github': 0.8,
+  // 中可信度
+  'news': 0.7,
+  'blog': 0.6,
+  'rss-hackernews': 0.6,
+  'rss-techcrunch': 0.6,
+  'rss-theverge': 0.6,
+  'rss-wired': 0.6,
+  'rss-producthunt': 0.6,
+  // 低可信度
+  'community': 0.4,
+  'social': 0.3,
+  'reddit': 0.4,
+  'v2ex': 0.4,
+  'rss-cnblogs': 0.5,
+  'rss-juejin': 0.5,
+  'duckduckgo': 0.4,
+};
+
+/**
+ * 计算数据完整性评分
+ */
+export function calculateCompleteness(
+  searchResults: SearchResult[],
+  extractedContent: ExtractionResult[],
+  analysis?: AnalysisResult,
+  researchDimensions: string[] = []
+): number {
+  let score = 100;
+
+  // 1. 搜索结果数量检查
+  const minResults = 15;
+  if (searchResults.length < minResults) {
+    const penalty = (minResults - searchResults.length) * 3;
+    score -= penalty;
+  }
+
+  // 2. 提取结果数量检查
+  const minExtractions = 5;
+  if (extractedContent.length < minExtractions) {
+    const penalty = (minExtractions - extractedContent.length) * 5;
+    score -= penalty;
+  }
+
+  // 3. 分析维度覆盖检查
+  if (researchDimensions.length > 0) {
+    const coveredDimensions = new Set(
+      searchResults.map((r) => r.dimension).filter(Boolean)
+    );
+    const coverage = coveredDimensions.size / researchDimensions.length;
+    if (coverage < 0.6) {
+      score -= 15;
+    }
+  }
+
+  // 4. 功能分析检查
+  const minFeatures = 3;
+  if (analysis?.features && analysis.features.length < minFeatures) {
+    const penalty = (minFeatures - analysis.features.length) * 8;
+    score -= penalty;
+  }
+
+  // 5. 竞品分析检查
+  const minCompetitors = 2;
+  if (analysis?.competitors && analysis.competitors.length < minCompetitors) {
+    const penalty = (minCompetitors - analysis.competitors.length) * 10;
+    score -= penalty;
+  }
+
+  return Math.max(0, Math.min(100, score));
+}
+
+/**
+ * 计算来源可信度评分
+ */
+export function calculateCredibility(
+  searchResults: SearchResult[],
+  extractedContent: ExtractionResult[]
+): number {
+  const allSources = [
+    ...searchResults.map((r) => r.source),
+    ...extractedContent.map((e) => e.source),
+  ];
+
+  if (allSources.length === 0) {
+    return 0;
+  }
+
+  let totalCredibility = 0;
+
+  for (const source of allSources) {
+    totalCredibility += SOURCE_CREDIBILITY_WEIGHTS[source] ?? 0.5;
+  }
+
+  const avgCredibility = (totalCredibility / allSources.length) * 100;
+
+  // 额外检查：高可信度来源占比
+  const highCredSources = ['official-docs', 'government', 'academic'];
+  const highCredRatio = allSources.filter((s) => highCredSources.includes(s)).length / allSources.length;
+
+  if (highCredRatio < 0.2) {
+    return Math.max(0, avgCredibility - 20);
+  }
+
+  return Math.max(0, Math.min(100, avgCredibility));
+}
+
+/**
+ * 计算内容相关性评分
+ */
+export function calculateRelevance(
+  searchResults: SearchResult[],
+  targetIndustry: string,
+  researchDimensions: string[] = []
+): number {
+  if (searchResults.length === 0) {
+    return 0;
+  }
+
+  // 基于质量分数的相关性评估
+  const highQualityCount = searchResults.filter((r) => r.quality >= 7).length;
+  const lowQualityCount = searchResults.filter((r) => r.quality < 4).length;
+
+  const highQualityRatio = highQualityCount / searchResults.length;
+  const lowQualityRatio = lowQualityCount / searchResults.length;
+
+  let qualityScore = 0;
+  if (highQualityRatio >= 0.3 && lowQualityRatio <= 0.3) {
+    qualityScore = 80 + highQualityRatio * 20;
+  } else if (highQualityRatio >= 0.2 && lowQualityRatio <= 0.4) {
+    qualityScore = 60 + highQualityRatio * 20;
+  } else {
+    qualityScore = 40 + highQualityRatio * 20;
+  }
+
+  // 维度匹配度
+  let dimensionScore = 100;
+  if (researchDimensions.length > 0) {
+    const coveredDimensions = new Set(
+      searchResults.map((r) => r.dimension).filter(Boolean)
+    );
+    const matchRatio = Math.min(1, coveredDimensions.size / researchDimensions.length);
+    dimensionScore = matchRatio * 100;
+  }
+
+  // 去重率
+  const titles = searchResults.map((r) => r.title.toLowerCase());
+  const uniqueTitles = new Set(titles);
+  const deduplicationRate = uniqueTitles.size / titles.length;
+  const dedupScore = deduplicationRate * 100;
+
+  const relevance = qualityScore * 0.5 + dimensionScore * 0.3 + dedupScore * 0.2;
+
+  return Math.max(0, Math.min(100, relevance));
+}
+
+/**
+ * 计算综合质量评分
+ */
+export function calculateOverallScore(
+  completeness: number,
+  credibility: number,
+  relevance: number
+): number {
+  const overall = completeness * 0.4 + credibility * 0.3 + relevance * 0.3;
+  return Math.max(0, Math.min(100, Math.round(overall)));
+}
+
+/**
+ * 完整的质量评估
+ */
+export function evaluateQuality(
+  searchResults: SearchResult[],
+  extractedContent: ExtractionResult[],
+  analysis?: AnalysisResult,
+  targetIndustry?: string,
+  researchDimensions: string[] = []
+): QualityMetrics {
+  const completeness = calculateCompleteness(
+    searchResults,
+    extractedContent,
+    analysis,
+    researchDimensions
+  );
+
+  const credibility = calculateCredibility(searchResults, extractedContent);
+
+  const relevance = calculateRelevance(
+    searchResults,
+    targetIndustry || '',
+    researchDimensions
+  );
+
+  const overallScore = calculateOverallScore(completeness, credibility, relevance);
+
+  const issues: string[] = [];
+  const suggestions: string[] = [];
+
+  if (completeness < 50) {
+    issues.push('数据完整性不足');
+    suggestions.push('增加搜索查询数量和维度覆盖');
+  }
+
+  if (credibility < 50) {
+    issues.push('数据来源可信度低');
+    suggestions.push('优先使用官方文档和权威来源');
+  }
+
+  if (relevance < 50) {
+    issues.push('内容与目标行业相关性不足');
+    suggestions.push('重新评估行业判断或调整搜索关键词');
+  }
+
+  return {
+    overallScore,
+    completeness,
+    credibility,
+    relevance,
+    dimensionScores: {
+      completeness,
+      credibility,
+      relevance,
+    },
+    issues,
+    suggestions,
+    calculatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * 质量门禁决策
+ */
+export type QualityGateAction = 'proceed' | 'restart';
+
+export interface QualityGateResult {
+  action: QualityGateAction;
+  shouldWarn: boolean;
+  reason?: string;
+}
+
+/**
+ * 质量阈值配置 - 可在运行时自定义
+ */
+export interface QualityThresholdsConfig {
+  /** 通过阈值 - 超过此分数直接通过 */
+  passThreshold: number;
+  /** 警告阈值 - 超过此分数但低于通过阈值时警告 */
+  warnThreshold: number;
+  /** 重启阈值 - 低于此分数必须重启 */
+  restartThreshold: number;
+}
+
+/**
+ * 默认质量阈值
+ */
+export const DEFAULT_QUALITY_THRESHOLDS: QualityThresholdsConfig = {
+  passThreshold: 70,
+  warnThreshold: 50,
+  restartThreshold: 30,
+};
+
+/**
+ * 可配置的质量阈值
+ */
+let qualityThresholds: QualityThresholdsConfig = { ...DEFAULT_QUALITY_THRESHOLDS };
+
+/**
+ * 设置质量阈值
+ */
+export function setQualityThresholds(config: Partial<QualityThresholdsConfig>): void {
+  qualityThresholds = { ...qualityThresholds, ...config };
+}
+
+/**
+ * 获取当前质量阈值
+ */
+export function getQualityThresholds(): QualityThresholdsConfig {
+  return { ...qualityThresholds };
+}
+
+/**
+ * 重置质量阈值到默认值
+ */
+export function resetQualityThresholds(): void {
+  qualityThresholds = { ...DEFAULT_QUALITY_THRESHOLDS };
+}
+
+/**
+ * 根据质量评分决定是否继续或重启（使用可配置阈值）
+ */
+export function qualityGateDecision(
+  overallScore: number,
+  customThresholds?: QualityThresholdsConfig
+): QualityGateResult {
+  const thresholds = customThresholds || qualityThresholds;
+
+  if (overallScore >= thresholds.passThreshold) {
+    return { action: 'proceed', shouldWarn: false };
+  }
+
+  if (overallScore >= thresholds.warnThreshold) {
+    return {
+      action: 'proceed',
+      shouldWarn: true,
+      reason: '质量评分一般，建议关注数据质量',
+    };
+  }
+
+  if (overallScore >= thresholds.restartThreshold) {
+    return {
+      action: 'restart',
+      shouldWarn: false,
+      reason: '质量评分较差，建议重新搜索',
+    };
+  }
+
+  return {
+    action: 'restart',
+    shouldWarn: true,
+    reason: '质量评分严重不足，必须重新搜索',
+  };
+}
+
 /**
  * 计算报告质量评分
  */
