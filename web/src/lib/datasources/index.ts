@@ -38,19 +38,10 @@ export type DataSourceType =
   // RSS 订阅
   | 'rss-hackernews' | 'rss-techcrunch' | 'rss-theverge' | 'rss-wired' | 'rss-producthunt'
   | 'rss-cnblogs' | 'rss-juejin' | 'rss-googlenews' | 'rss-mittechreview'
-  // 免费搜索
-  | 'duckduckgo'
-  // GitHub
-  | 'github'
-  // 国际技术社区
-  | 'reddit' | 'hackernews-api'
-  // 国内技术社区
-  | 'v2ex';
-
-// 获取环境变量
-function getEnv(key: string): string | undefined {
-  return process.env[key];
-}
+  // Hacker News
+  | 'hackernews-api'
+  // SearXNG
+  | 'searxng';
 
 // ==================== RSS 订阅服务（支持多源配置）====================
 
@@ -178,245 +169,6 @@ class RSSService implements SearchService {
   }
 }
 
-// ==================== DuckDuckGo 搜索（免费）====================
-
-/**
- * 带重试的 fetch 函数
- */
-async function fetchWithRetry(
-  url: string,
-  options: RequestInit,
-  maxRetries = 3,
-  baseDelay = 1000
-): Promise<Response> {
-  let lastError: Error | undefined;
-
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-      const res = await fetch(url, {
-        ...options,
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-      return res;
-    } catch (error) {
-      lastError = error as Error;
-      if (attempt < maxRetries - 1) {
-        const delay = baseDelay * Math.pow(2, attempt);
-        console.warn(`[DuckDuckGo] Fetch attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-  }
-
-  throw lastError;
-}
-
-class DuckDuckGoService implements SearchService {
-  name = 'DuckDuckGo';
-  type = 'duckduckgo' as DataSourceType;
-
-  async search(query: string, limit = 10): Promise<SearchResult[]> {
-    const results: SearchResult[] = [];
-
-    try {
-      // API 搜索
-      const res = await fetchWithRetry(
-        `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`,
-        {}
-      );
-
-      if (!res.ok) throw new Error(`DuckDuckGo API error: ${res.status}`);
-
-      const text = await res.text();
-      if (!text || text.trim() === '') {
-        return [];
-      }
-
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch (parseError) {
-        console.error('DuckDuckGo JSON parse error:', parseError);
-        return [];
-      }
-
-      // Instant Answer
-      if (data.AbstractText) {
-        results.push({
-          title: data.Heading || query,
-          url: data.AbstractURL || '',
-          content: data.AbstractText,
-          source: 'duckduckgo',
-        });
-      }
-
-      // Related Topics
-      for (const topic of (data.RelatedTopics || []).slice(0, limit - results.length)) {
-        if (topic.Result) {
-          results.push({
-            title: topic.Text || query,
-            url: topic.FirstURL || '',
-            content: topic.Text || '',
-            source: 'duckduckgo',
-          });
-        }
-      }
-    } catch (error) {
-      console.warn('DuckDuckGo API search failed, falling back to HTML search:', error);
-    }
-
-    // HTML 搜索作为备选
-    if (results.length < limit) {
-      try {
-        const htmlRes = await fetchWithRetry(
-          `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}&kl=us-en`,
-          {}
-        );
-        if (htmlRes.ok) {
-          const html = await htmlRes.text();
-          if (html && html.trim()) {
-            const linkRegex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([^<]+)<\/a>/g;
-            let match: RegExpExecArray | null = null;
-            let count = 0;
-            while ((match = linkRegex.exec(html)) !== null && results.length < limit && count < 5) {
-              if (!results.find(r => r.url === match![1])) {
-                results.push({
-                  title: this.stripHtml(match[2]),
-                  url: match[1],
-                  content: `相关搜索结果: ${match[2]}`,
-                  source: 'duckduckgo',
-                });
-                count++;
-              }
-            }
-          }
-        }
-      } catch (htmlError) {
-        console.warn('DuckDuckGo HTML search failed:', htmlError);
-      }
-    }
-
-    return results.slice(0, limit);
-  }
-
-  private stripHtml(html: string): string {
-    return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
-  }
-}
-
-// ==================== GitHub 搜索====================
-
-class GitHubService implements SearchService {
-  name = 'GitHub';
-  type = 'github' as DataSourceType;
-
-  async search(query: string, limit = 10): Promise<SearchResult[]> {
-    const token = getEnv('GITHUB_TOKEN');
-
-    const headers: Record<string, string> = {
-      'Accept': 'application/vnd.github.v3+json',
-      'User-Agent': 'Product-Research-Web',
-    };
-
-    // 如果有 token，添加认证头（提高速率限制到 5000 次/小时）
-    if (token) {
-      headers['Authorization'] = `token ${token}`;
-    }
-
-    try {
-      const res = await fetch(
-        `https://api.github.com/search/repositories?q=${encodeURIComponent(query)}&sort=stars&order=desc&per_page=${limit}`,
-        {
-          headers,
-          signal: AbortSignal.timeout(15000),
-        }
-      );
-
-      // 如果请求失败（速率限制等），静默返回空结果而不是抛出异常
-      if (!res.ok) {
-        console.log(`GitHub API: rate limited or error (${res.status}), skipping`);
-        return [];
-      }
-
-      const data = await res.json();
-      return (data.items || []).slice(0, limit).map((item: any) => ({
-        title: item.full_name || query,
-        url: item.html_url || '',
-        content: item.description || `⭐ ${item.stargazers_count} stars | ${item.language || 'N/A'}`,
-        source: 'github',
-        publishedAt: item.updated_at,
-      }));
-    } catch (error) {
-      // 静默处理错误，避免中断整个研究任务
-      console.log('GitHub Search: skipped due to error');
-      return [];
-    }
-  }
-}
-
-// ==================== Reddit 社区讨论====================
-
-class RedditService implements SearchService {
-  name = 'Reddit';
-  type = 'reddit' as DataSourceType;
-
-  async search(query: string, limit = 10): Promise<SearchResult[]> {
-    try {
-      // Reddit 公开帖子 API
-      const subreddits = ['programming', 'technology', 'software', 'webdev', 'computers'];
-      const results: SearchResult[] = [];
-
-      for (const subreddit of subreddits.slice(0, 2)) {
-        if (results.length >= limit) break;
-
-        try {
-          const res = await fetch(
-            `https://www.reddit.com/r/${subreddit}/new.json?limit=${Math.ceil(limit / 2)}&sort=new`,
-            {
-              headers: { 'User-Agent': 'ProductResearchBot/1.0' },
-              signal: AbortSignal.timeout(15000),
-            }
-          );
-          if (!res.ok) continue;
-
-          const data = await res.json();
-          const posts = (data.data?.children || []).map((child: any) => child.data);
-
-          // 过滤匹配的内容
-          for (const post of posts) {
-            if (results.length >= limit) break;
-            const title = post.title?.toLowerCase() || '';
-            const content = (post.selftext || '').toLowerCase();
-            const queryLower = query.toLowerCase();
-
-            if (title.includes(queryLower) || content.includes(queryLower)) {
-              results.push({
-                title: post.title || query,
-                url: `https://reddit.com${post.permalink}`,
-                content: (post.selftext || post.title || '').substring(0, 300),
-                source: `reddit-${subreddit}`,
-                publishedAt: new Date(post.created_utc * 1000).toISOString(),
-              });
-            }
-          }
-        } catch (e) {
-          // Continue to next subreddit
-        }
-      }
-
-      return results.slice(0, limit);
-    } catch (error) {
-      console.error('Reddit Search error:', error);
-      return [];
-    }
-  }
-}
-
 // ==================== Hacker News 官方 API====================
 
 class HackerNewsAPIService implements SearchService {
@@ -460,60 +212,6 @@ class HackerNewsAPIService implements SearchService {
         }));
     } catch (error) {
       // 静默处理，不记录错误
-      return [];
-    }
-  }
-}
-
-// ==================== V2EX 技术社区（国内）====================
-
-class V2EXService implements SearchService {
-  name = 'V2EX';
-  type = 'v2ex' as DataSourceType;
-
-  async search(query: string, limit = 10): Promise<SearchResult[]> {
-    try {
-      // V2EX 公开 API
-      const tabs = ['programming', 'technology', 'life', 'creative'];
-      const results: SearchResult[] = [];
-
-      for (const tab of tabs) {
-        if (results.length >= limit) break;
-
-        try {
-          const res = await fetch(
-            `https://www.v2ex.com/api/v2/tabs/${tab}/topics?page=1&size=${limit}`,
-            { signal: AbortSignal.timeout(15000) }
-          );
-          if (!res.ok) continue;
-
-          const data = await res.json();
-          const topics = data.results || [];
-
-          for (const topic of topics) {
-            if (results.length >= limit) break;
-            const title = (topic.title || '').toLowerCase();
-            const content = (topic.content || topic.title || '').toLowerCase();
-            const queryLower = query.toLowerCase();
-
-            if (title.includes(queryLower) || content.includes(queryLower)) {
-              results.push({
-                title: topic.title || query,
-                url: `https://www.v2ex.com/t/${topic.id}`,
-                content: (topic.content || topic.title || '').substring(0, 300),
-                source: 'v2ex',
-                publishedAt: topic.created,
-              });
-            }
-          }
-        } catch (e) {
-          // Continue to next tab
-        }
-      }
-
-      return results.slice(0, limit);
-    } catch (error) {
-      console.error('V2EX Search error:', error);
       return [];
     }
   }
@@ -682,13 +380,10 @@ export class DataSourceManager {
     ['rss-producthunt', () => new RSSService()],
     ['rss-googlenews', () => new RSSService()],
     ['rss-mittechreview', () => new RSSService()],
-    ['rss-cnblogs', () => new RSSService()],
+    ['rss-cnblogs', () => new CnBlogsRSSService()],
     ['rss-juejin', () => new RSSService()],
-    ['duckduckgo', () => new DuckDuckGoService()],
-    ['github', () => new GitHubService()],
-    ['reddit', () => new RedditService()],
     ['hackernews-api', () => new HackerNewsAPIService()],
-    ['v2ex', () => new V2EXService()],
+    ['searxng', () => new (require('./searxng').SearxngService)()],
   ]);
 
   // 注册所有已实现的服务
@@ -703,11 +398,15 @@ export class DataSourceManager {
       // 同步导入 db 模块
       const { dataSourceDb } = require('@/lib/db');
       const sources = dataSourceDb.getActive.all() as Array<{ type: string }>;
+      console.log('[DataSourceManager] 数据库查询到的数据源:', sources.map(s => s.type));
       if (sources.length > 0) {
         this.enabledSources = new Set(sources.map((s: { type: string }) => s.type as DataSourceType));
+        console.log('[DataSourceManager] 启用的数据源:', Array.from(this.enabledSources));
+      } else {
+        console.log('[DataSourceManager] 数据库返回空列表');
       }
     } catch (error) {
-      console.error('Failed to load enabled sources:', error);
+      console.error('[DataSourceManager] 加载数据源失败:', error);
     }
   }
 

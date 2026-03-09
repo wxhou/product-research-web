@@ -415,6 +415,64 @@ export interface UseCaseAnalysis {
   valuePropositions: string[];
 }
 
+/** 用户画像分析 */
+export interface UserPersonaAnalysis {
+  /** 决策者特征 */
+  decisionMakers: string[];
+  /** 使用者特征 */
+  users: string[];
+  /** 受益者 */
+  beneficiaries: string[];
+}
+
+/** ROI 投资回报分析 */
+export interface ROIAnalysis {
+  /** 成本对比 */
+  costComparison: string;
+  /** 回报周期 */
+  paybackPeriod: string;
+  /** 投资回报率 */
+  roi: string;
+}
+
+/** KPI 指标 */
+export interface KPIMetric {
+  /** 指标名称 */
+  name: string;
+  /** 指标描述 */
+  description: string;
+  /** 目标值 */
+  targetValue: string;
+  /** 衡量标准 */
+  benchmark: string;
+  /** 类别 */
+  category: '效率' | '成本' | '质量' | '满意度' | '其他';
+}
+
+/** 风险项 */
+export interface RiskItem {
+  /** 风险描述 */
+  risk: string;
+  /** 发生概率 */
+  probability: '高' | '中' | '低';
+  /** 影响程度 */
+  impact: '高' | '中' | '低';
+  /** 应对措施 */
+  mitigation: string;
+}
+
+/** 供应商信息 */
+export interface VendorInfo {
+  /** 供应商名称 */
+  name: string;
+  /** 核心功能 */
+  coreFeatures: string[];
+  /** 价格区间 */
+  priceRange: string;
+  /** 服务能力 */
+  serviceCapability: string;
+}
+
 /** 详细分析报告 */
 export interface DetailedAnalysis {
   features: FeatureAnalysis[];
@@ -453,6 +511,18 @@ export interface AnalysisResult extends Partial<DetailedAnalysis> {
   businessModel?: BusinessModelAnalysis;
   roadmap?: ImplementationRoadmap;
   qualityAssessment?: ReportQualityAssessment;
+
+  // 增强分析维度
+  /** 用户画像分析 */
+  userPersonaAnalysis?: UserPersonaAnalysis;
+  /** ROI 投资回报分析 */
+  roiAnalysis?: ROIAnalysis;
+  /** KPI 指标建议 */
+  kpiMetrics?: KPIMetric[];
+  /** 风险矩阵分析 */
+  riskMatrix?: RiskItem[];
+  /** 供应商对比分析 */
+  vendorComparison?: VendorInfo[];
 }
 
 // ============================================================

@@ -5,6 +5,8 @@
  */
 
 import { generateText } from '@/lib/llm';
+import { parseJsonFromLLM } from '@/lib/json-utils';
+import { calculateClarityScore, type ResearchIntent } from './user-input-parser';
 
 /**
  * 行业判断输入
@@ -28,6 +30,14 @@ export interface IndustryDetectionOutput {
   isUserCorrected?: boolean;
   /** 原始检测结果（如果经过用户修正） */
   originalDetection?: IndustryDetectionOutput;
+  /** 意图分析结果 */
+  intent?: ResearchIntent;
+  /** 关键词列表 */
+  keywords?: string[];
+  /** 核心主题 */
+  coreTheme?: string;
+  /** 清晰度分数 */
+  clarityScore?: number;
 }
 
 /**
@@ -87,12 +97,36 @@ const INDUSTRY_DIMENSION_MAPPING: Record<string, string[]> = {
 };
 
 /**
- * 检测行业
+ * 检测行业（包含意图分析 - 合并为单次 LLM 调用）
  */
 export async function detectIndustry(
   input: IndustryDetectionInput
 ): Promise<IndustryDetectionOutput> {
   const { title, description, keywords } = input;
+
+  // 进行模糊度检测
+  const clarityScore = calculateClarityScore(title);
+  const isFuzzy = clarityScore < 0.6;
+
+  // 构建合并的 Prompt（意图分析 + 行业判断）
+  const needsIntentAnalysis = isFuzzy || !keywords || keywords.length === 0;
+
+  let intentSection = '';
+  if (needsIntentAnalysis) {
+    intentSection = `
+## 意图分析要求
+请同时分析用户的研究意图：
+- product: 产品调研（了解产品功能、特性、使用方法）
+- market: 市场调研（了解市场规模、趋势、竞争格局）
+- technical: 技术调研（了解技术原理、实现方案、架构）
+- comparison: 对比分析（对比多个产品/方案的优劣）
+- general: 一般了解（泛泛了解基本信息）
+
+请在返回的 JSON 中添加以下字段：
+- "coreTheme": 核心主题（精简到3-5个字）
+- "intent": 研究意图
+- "keywords": 提取的关键词（最多5个）`;
+  }
 
   const prompt = `你是行业分析专家。根据以下产品信息，判断其所属的行业类别：
 
@@ -104,31 +138,60 @@ ${description || '无'}
 
 ## 关键词
 ${keywords?.join(', ') || '无'}
+${intentSection}
 
-请分析并返回 JSON 格式的结果：
+请分析并返回纯 JSON 格式的结果，不要包含任何解释性文字或 Markdown 标记：
 {
   "detectedIndustry": "主要行业类别",
   "confidence": 0-1 之间的置信度,
   "reasoning": "判断理由",
   "researchDimensions": ["维度1", "维度2", ...],
   "relatedIndustries": ["相关行业1", "相关行业2"] (可选)
+  ${needsIntentAnalysis ? ',\n  "coreTheme": "核心主题",\n  "intent": "intent值",\n  "keywords": ["关键词1", "关键词2"]' : ''}
 }
 
 请确保：
-1. 行业类别使用通用名称（如：B2B SaaS、消费者应用、硬件产品、医疗健康、金融服务、教育科技、电子商务、人工智能、游戏、汽车出行等）
-2. 研究维度应该与行业相关且有实际研究价值
-3. 如果产品跨多个行业，在 relatedIndustries 中列出`;
+1. 只输出 JSON，不要有其他文字
+2. 行业类别使用通用名称（如：B2B SaaS、消费者应用、硬件产品、医疗健康、金融服务、教育科技、电子商务、人工智能、游戏、汽车出行等）
+3. 研究维度应该与行业相关且有实际研究价值
+4. 如果产品跨多个行业，在 relatedIndustries 中列出
+5. JSON 字符串中不要包含换行符、制表符等特殊字符，只使用纯文本`;
 
   try {
     const responseText = await generateText(prompt);
 
-    // 提取 JSON
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('无法解析行业判断结果');
+    // 提取并解析 JSON
+    interface IndustryDetectionResult {
+      detectedIndustry?: string;
+      confidence?: number;
+      reasoning?: string;
+      researchDimensions?: string[];
+      relatedIndustries?: string[];
+      coreTheme?: string;
+      intent?: string;
+      keywords?: string[];
     }
 
-    const result = JSON.parse(jsonMatch[0]);
+    const result = parseJsonFromLLM<IndustryDetectionResult>(responseText);
+
+    // 提取意图信息
+    let intent: ResearchIntent | undefined;
+    let coreTheme: string | undefined;
+    let extractedKeywords: string[] | undefined;
+
+    if (needsIntentAnalysis) {
+      const validIntents: ResearchIntent[] = ['product', 'market', 'technical', 'comparison', 'general'];
+      if (result.intent && validIntents.includes(result.intent as ResearchIntent)) {
+        intent = result.intent as ResearchIntent;
+      }
+      coreTheme = result.coreTheme;
+      extractedKeywords = (result.keywords || []).slice(0, 5);
+    }
+
+    // 合并关键词
+    const mergedKeywords = keywords && keywords.length > 0
+      ? [...new Set([...keywords, ...(extractedKeywords || [])])]
+      : extractedKeywords || keywords || [];
 
     return {
       detectedIndustry: result.detectedIndustry || '通用',
@@ -136,6 +199,10 @@ ${keywords?.join(', ') || '无'}
       reasoning: result.reasoning || '',
       researchDimensions: result.researchDimensions || getDefaultDimensions(),
       relatedIndustries: result.relatedIndustries,
+      intent,
+      keywords: mergedKeywords,
+      coreTheme,
+      clarityScore,
     };
   } catch (error) {
     console.error('[IndustryDetector] 行业判断失败:', error);
@@ -145,6 +212,7 @@ ${keywords?.join(', ') || '无'}
       confidence: 0.3,
       reasoning: '行业判断失败，使用默认维度',
       researchDimensions: getDefaultDimensions(),
+      clarityScore,
     };
   }
 }
@@ -209,12 +277,15 @@ ${dimensions.join(', ')}
 
   try {
     const responseText = await generateText(prompt);
-    const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
+
+    // 使用健壮的 JSON 解析
+    const result = parseJsonFromLLM<Array<{query: string; dimension: string; purpose: string}>>(responseText);
+
+    if (!result || !Array.isArray(result)) {
       return generateFallbackQueries(title, dimensions);
     }
 
-    return JSON.parse(jsonMatch[0]);
+    return result;
   } catch (error) {
     console.error('[IndustryDetector] 生成行业查询失败:', error);
     return generateFallbackQueries(title, dimensions);

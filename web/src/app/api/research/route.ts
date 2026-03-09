@@ -6,6 +6,7 @@ import { generateText, getLLMConfig, PRODUCT_ANALYST_PROMPT } from '@/lib/llm';
 import { createResearchTask, getUserActiveTaskCount, getProjectLogs } from '@/lib/taskQueue';
 import { MarkdownStateManager } from '@/lib/research-agent/graph/markdown-state';
 import { getProgress } from '@/lib/research-agent/progress/tracker';
+import { parseJsonFromLLM } from '@/lib/json-utils';
 import type { ProgressDetail } from '@/lib/research-agent/types';
 
 // 获取当前用户信息
@@ -118,9 +119,10 @@ ${JSON.stringify(summary, null, 2)}
       maxTokens: 4000,
     });
 
-    const jsonMatch = result.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+    // 使用健壮的 JSON 解析
+    const parsed = parseJsonFromLLM(result);
+    if (parsed) {
+      return parsed;
     }
     throw new Error('Failed to parse LLM response');
   } catch (error) {

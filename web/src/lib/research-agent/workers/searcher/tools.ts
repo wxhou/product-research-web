@@ -66,12 +66,12 @@ function toResearchSearchResult(
   // 验证 source 是否是有效的 DataSourceType
   const validSources = [
     'rss-hackernews', 'rss-techcrunch', 'rss-theverge', 'rss-wired', 'rss-producthunt',
-    'duckduckgo', 'reddit', 'v2ex'
+    'rss-cnblogs', 'hackernews-api'
   ];
   const sourceStr = dsResult.source;
   const source = validSources.includes(sourceStr)
     ? (sourceStr as DataSourceType)
-    : 'duckduckgo' as DataSourceType;
+    : 'rss-hackernews' as DataSourceType;
 
   return {
     id: dsResult.url,
@@ -263,6 +263,9 @@ export function getDefaultSources(): DataSourceType[] {
 export const SOURCE_TIMEOUTS: Partial<Record<DataSourceType, number>> = {
   'rss-hackernews': 15000,
   'rss-techcrunch': 15000,
-  'duckduckgo': 30000,
-  'reddit': 30000,
+  'rss-theverge': 15000,
+  'rss-wired': 15000,
+  'rss-producthunt': 15000,
+  'rss-cnblogs': 15000,
+  'hackernews-api': 15000,
 };

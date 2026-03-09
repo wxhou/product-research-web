@@ -6,6 +6,7 @@
 
 import type { SearchResult, ExtractionResult } from '../../types';
 import { generateText } from '@/lib/llm';
+import { parseJsonFromLLM } from '@/lib/json-utils';
 
 /**
  * URL 可信度评级表
@@ -99,22 +100,31 @@ ${content.slice(0, 2000)}
 ${targetIndustry ? `## 目标行业\n${targetIndustry}` : ''}
 ${researchDimensions?.length ? `## 研究维度\n${researchDimensions.join(', ')}` : ''}
 
-请返回 JSON 格式的评估结果：
+请返回纯 JSON 格式的评估结果，不要包含任何解释性文字或 Markdown 标记：
 {
   "relevanceScore": 0-1,
   "confidenceScore": 0-1,
   "issues": ["发现的问题"]
-}`;
+}
+
+请确保：
+1. 只输出 JSON，不要有其他文字
+2. JSON 数组中的字符串不要包含换行符或特殊字符`;
 
   try {
     const responseText = await generateText(prompt);
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
 
-    if (!jsonMatch) {
+    // 使用健壮的 JSON 解析
+    const result = parseJsonFromLLM<{
+      relevanceScore: number;
+      confidenceScore: number;
+      issues: string[];
+    }>(responseText);
+
+    if (!result) {
       return { score: 0.5, confidence: 0.3, issues: ['无法解析评估结果'] };
     }
 
-    const result = JSON.parse(jsonMatch[0]);
     return {
       score: result.relevanceScore ?? 0.5,
       confidence: result.confidenceScore ?? 0.3,

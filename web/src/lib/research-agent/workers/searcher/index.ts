@@ -12,11 +12,13 @@
 
 import type { ResearchState } from '../../state';
 import type { SearchResult, SearchQuery, RoundResult } from '../../types';
+import type { DataSourceType } from '../../../datasources';
 import { createSearchTools, getDefaultSources, type SearchTools } from './tools';
 import { updateProgress } from '../../progress/tracker';
 import { createCancelCheck } from '../../cancellation/handler';
 import { SEARCHER_DEFAULTS } from '../../config/defaults';
 import { generateText } from '@/lib/llm';
+import { parseJsonFromLLM } from '@/lib/json-utils';
 import { calculateCredibility, calculateRelevance } from '../../quality/scorer';
 import { estimateQuality, shouldContinueSearch } from './quality-estimator';
 
@@ -46,7 +48,7 @@ async function withTimeout<T>(
  */
 export interface SearcherConfig {
   /** 启用的数据源 */
-  enabledSources: SearchQuery['dimension'][];
+  enabledSources: DataSourceType[];
   /** 最大结果数 (目标: 100+) */
   maxResults: number;
   /** 最小质量分数 */
@@ -176,6 +178,9 @@ async function executeSearch(
 
       // 分批执行搜索
       const batchSize = 5;
+
+      // 调试日志：显示数据源
+      console.log('[Searcher] 使用的目标数据源:', searchPlan.targetSources);
       const roundResultsList: SearchResult[] = [];
       const failedQueries: SearchQuery[] = [];
 
@@ -451,6 +456,7 @@ async function generateMissingDimensionQueries(
 ): Promise<SearchQuery[]> {
   if (missingDimensions.length === 0) return [];
 
+  // 增强的查询生成提示词
   const prompt = `你是研究查询规划专家。基于以下信息，为缺失维度生成新的搜索查询：
 
 ## 产品信息
@@ -460,26 +466,51 @@ async function generateMissingDimensionQueries(
 ## 缺失维度
 ${missingDimensions.map((d) => `- ${d}`).join('\n')}
 
+## 增强要求
+除常规产品信息外，请同时生成以下类型的查询：
+
+1. 竞品评价查询：搜索竞品的用户评价、优缺点分析
+   - 例如："{竞品} 用户评价 优缺点"
+   - 例如："{竞品} vs {产品} 对比评测"
+
+2. 成本数据查询：搜索产品价格、成本相关数据
+   - 例如："{行业} {产品} 价格 报价 成本"
+   - 例如："{产品} 收费标准 定价策略"
+
+3. 实施案例查询：搜索实际落地案例和效果数据
+   - 例如："{行业} {产品} 实施案例 效果 数据"
+   - 例如："{产品} 成功案例 客户案例"
+
+4. 风险信息查询：搜索潜在风险和问题
+   - 例如："{产品} 问题 风险 事故 投诉"
+   - 例如："{产品} 缺点 不足 失败案例"
+
 ## 要求
 1. 为每个缺失维度生成 1-2 个搜索查询
-2. 查询应聚焦于获取缺失维度的信息
-3. 查询应与产品高度相关
+2. 同时为上述四类增强查询各生成 1-2 个查询
+3. 查询应聚焦于获取缺失维度的信息
+4. 查询应与产品高度相关
 
 请返回 JSON 数组，格式：
 [{"query": "搜索查询内容", "dimension": "维度名称", "purpose": "查询目的", "priority": 1-5}]`;
 
   try {
     const responseText = await generateText(prompt);
-    const queries = JSON.parse(responseText);
+    const queries = parseJsonFromLLM<Array<{
+      query: string;
+      dimension: string;
+      purpose: string;
+      priority: number | string;
+    }>>(responseText, []);
 
     // 将字符串优先级转换为数字
     const priorityMap: Record<string, number> = { high: 1, medium: 2, low: 3 };
 
-    return queries.map((q: Record<string, string | number>, idx: number) => ({
+    return queries.map((q, idx) => ({
       id: `iter-${Date.now()}-${idx}`,
-      query: q.query,
-      dimension: q.dimension || missingDimensions[idx % missingDimensions.length],
-      purpose: q.purpose || `补充 ${q.dimension} 维度`,
+      query: String(q.query || ''),
+      dimension: String(q.dimension || missingDimensions[idx % missingDimensions.length]),
+      purpose: String(q.purpose || `补充 ${q.dimension} 维度`),
       priority: typeof q.priority === 'number' ? q.priority : (priorityMap[String(q.priority)] || 2),
     }));
   } catch (error) {

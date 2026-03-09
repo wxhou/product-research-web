@@ -22,6 +22,8 @@ export interface ReportGenerationContext {
 
 /**
  * 大纲生成提示词
+ *
+ * 【优化说明】：改为引用 Analyzer 已完成的分析结果
  */
 export function generateOutlinePrompt(context: ReportGenerationContext): string {
   const { title, keywords, analysis } = context;
@@ -40,10 +42,15 @@ ${keywords.join(', ')}
 【数据概述】
 ${dataOverview}
 
+【引用分析结果】
+以下内容来自 Analyzer 阶段的分析结果，请基于这些结果组织报告大纲：
+
+${generateEnhancedDataSummary(analysis)}
+
 【格式要求】
 1. 输出 Markdown 格式
 2. 必须包含大纲（使用 ## 二级标题）
-3. 根据数据情况自动决定章节取舍
+3. 根据数据情况自动决定章节取舍，数据丰富的章节详述，数据缺失的章节简略
 4. 战略建议章节需包含具体数字目标、实施时间表
 
 【任务】
@@ -53,6 +60,11 @@ ${dataOverview}
 - 竞争格局
 - 功能分析
 - SWOT 分析
+- 用户画像分析
+- ROI 投资回报分析
+- KPI 指标建议
+- 风险矩阵分析
+- 供应商对比分析
 - 战略建议（必须包含量化指标）
 - 数据质量评估
 
@@ -61,6 +73,8 @@ ${dataOverview}
 
 /**
  * 内容生成提示词
+ *
+ * 【优化说明】：改为引用 Analyzer 已完成的分析结果
  */
 export function generateContentPrompt(
   context: ReportGenerationContext,
@@ -73,6 +87,9 @@ export function generateContentPrompt(
 
   // 预处理 citations
   const formattedCitations = formatCitations(citations);
+
+  // 生成增强分析摘要
+  const enhancedSummary = generateEnhancedDataSummary(analysis);
 
   return `你是专业的产品调研报告撰写专家。
 
@@ -87,6 +104,11 @@ ${outline}
 
 【分析数据】
 ${serializedData}
+
+【增强分析结果摘要】
+以下内容来自 Analyzer 阶段的分析结果，请直接整合到报告中：
+
+${enhancedSummary}
 
 【引用来源】
 ${formattedCitations}
@@ -106,7 +128,13 @@ ${formattedCitations}
    - 风险评估（高/中/低）
 
 【任务】
-请根据以上大纲和分析数据，生成完整的调研报告。`;
+请根据以上大纲和分析数据，生成完整的调研报告。报告应包含以下增强分析维度的内容：
+- 用户画像分析 - 基于 Analyzer 分析结果
+- ROI 投资回报分析 - 基于 Analyzer 分析结果
+- KPI 指标建议 - 基于 Analyzer 分析结果
+- 风险矩阵分析 - 基于 Analyzer 分析结果
+- 供应商对比分析 - 基于 Analyzer 分析结果
+`;
 }
 
 /**
@@ -143,6 +171,23 @@ function generateDataOverview(analysis: AnalysisResult): string {
   if (analysis.swot?.threats?.length) swotItems.push(`威胁 ${analysis.swot.threats.length} 条`);
   if (swotItems.length) parts.push(`- SWOT: ${swotItems.join(', ')}`);
 
+  // 增强分析维度
+  if (analysis.userPersonaAnalysis) {
+    parts.push('- 用户画像分析: 有');
+  }
+  if (analysis.roiAnalysis) {
+    parts.push('- ROI分析: 有');
+  }
+  if (analysis.kpiMetrics?.length) {
+    parts.push(`- KPI指标: ${analysis.kpiMetrics.length} 个`);
+  }
+  if (analysis.riskMatrix?.length) {
+    parts.push(`- 风险矩阵: ${analysis.riskMatrix.length} 项`);
+  }
+  if (analysis.vendorComparison?.length) {
+    parts.push(`- 供应商对比: ${analysis.vendorComparison.length} 家`);
+  }
+
   // 定量数据
   if (analysis.businessModel) parts.push('- 商业模式: 有');
   if (analysis.userResearch) parts.push('- 用户研究: 有');
@@ -159,6 +204,69 @@ function generateDataOverview(analysis: AnalysisResult): string {
   }
 
   return parts.length > 0 ? parts.join('\n') : '无数据';
+}
+
+/**
+ * 生成增强分析摘要
+ * 用于 Reporter 引用 Analyzer 已完成的分析结果
+ */
+function generateEnhancedDataSummary(analysis: AnalysisResult): string {
+  const parts: string[] = [];
+
+  // 用户画像分析
+  if (analysis.userPersonaAnalysis) {
+    const upa = analysis.userPersonaAnalysis;
+    parts.push('### 用户画像分析');
+    if (upa.decisionMakers?.length) {
+      parts.push(`- 决策者: ${upa.decisionMakers.join(', ')}`);
+    }
+    if (upa.users?.length) {
+      parts.push(`- 使用者: ${upa.users.join(', ')}`);
+    }
+    if (upa.beneficiaries?.length) {
+      parts.push(`- 受益者: ${upa.beneficiaries.join(', ')}`);
+    }
+    parts.push('');
+  }
+
+  // ROI 分析
+  if (analysis.roiAnalysis) {
+    const roi = analysis.roiAnalysis;
+    parts.push('### ROI 投资回报分析');
+    if (roi.costComparison) parts.push(`- 成本对比: ${roi.costComparison}`);
+    if (roi.paybackPeriod) parts.push(`- 回报周期: ${roi.paybackPeriod}`);
+    if (roi.roi) parts.push(`- 投资回报率: ${roi.roi}`);
+    parts.push('');
+  }
+
+  // KPI 指标
+  if (analysis.kpiMetrics?.length) {
+    parts.push('### KPI 指标建议');
+    for (const kpi of analysis.kpiMetrics.slice(0, 5)) {
+      parts.push(`- ${kpi.name}: ${kpi.targetValue} (${kpi.benchmark})`);
+    }
+    parts.push('');
+  }
+
+  // 风险矩阵
+  if (analysis.riskMatrix?.length) {
+    parts.push('### 风险矩阵分析');
+    for (const risk of analysis.riskMatrix.slice(0, 5)) {
+      parts.push(`- ${risk.risk} (概率: ${risk.probability}, 影响: ${risk.impact})`);
+      parts.push(`  - 应对措施: ${risk.mitigation}`);
+    }
+    parts.push('');
+  }
+
+  // 供应商对比
+  if (analysis.vendorComparison?.length) {
+    parts.push('### 供应商对比分析');
+    for (const vendor of analysis.vendorComparison.slice(0, 5)) {
+      parts.push(`- ${vendor.name}: ${vendor.priceRange}, ${vendor.serviceCapability}`);
+    }
+  }
+
+  return parts.length > 0 ? parts.join('\n') : '无增强分析数据';
 }
 
 /**
@@ -198,6 +306,17 @@ export function serializeAnalysisData(analysis: AnalysisResult): string {
       architecture: analysis.techAnalysis.architecture?.slice(0, 5) || [],
       techStack: analysis.techAnalysis.techStack?.slice(0, 10) || [],
     } : undefined,
+    // 新增增强分析字段
+    userPersonaAnalysis: analysis.userPersonaAnalysis ? {
+      decisionMakers: analysis.userPersonaAnalysis.decisionMakers?.slice(0, 5) || [],
+      users: analysis.userPersonaAnalysis.users?.slice(0, 5) || [],
+      beneficiaries: analysis.userPersonaAnalysis.beneficiaries?.slice(0, 5) || [],
+    } : undefined,
+    roiAnalysis: analysis.roiAnalysis,
+    kpiMetrics: analysis.kpiMetrics?.slice(0, 10) || [],
+    riskMatrix: analysis.riskMatrix?.slice(0, 10) || [],
+    vendorComparison: analysis.vendorComparison?.slice(0, 10) || [],
+    // 原有字段
     businessModel: analysis.businessModel,
     userResearch: analysis.userResearch,
     confidenceScore: analysis.confidenceScore,

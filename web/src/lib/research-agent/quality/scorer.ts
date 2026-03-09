@@ -179,7 +179,6 @@ const SOURCE_CREDIBILITY_WEIGHTS: Record<string, number> = {
   'official-docs': 1.0,
   'government': 1.0,
   'academic': 0.9,
-  'github': 0.8,
   // 中可信度
   'news': 0.7,
   'blog': 0.6,
@@ -191,11 +190,9 @@ const SOURCE_CREDIBILITY_WEIGHTS: Record<string, number> = {
   // 低可信度
   'community': 0.4,
   'social': 0.3,
-  'reddit': 0.4,
-  'v2ex': 0.4,
   'rss-cnblogs': 0.5,
   'rss-juejin': 0.5,
-  'duckduckgo': 0.4,
+  'hackernews-api': 0.6,
 };
 
 /**

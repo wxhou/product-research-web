@@ -23,6 +23,7 @@ import { generateText, getLLMConfig } from '../../../llm';
 import { updateProgress } from '../../progress/tracker';
 import { jsonrepair } from 'jsonrepair';
 import { detectIndustry, getIndustryDimensions } from './industry-detector';
+import { calculateClarityScore } from './user-input-parser';
 
 /**
  * Planner Agent 配置
@@ -32,24 +33,40 @@ export interface PlannerConfig {
   useLLM: boolean;
   /** 默认目标数据源 */
   defaultSources: DataSourceType[];
+  /** 获取数据源的函数（延迟调用） */
+  getSources?: () => DataSourceType[];
 }
 
 /** 默认配置 */
-// 从 DataSourceManager 动态获取默认数据源
+// 从 DataSourceManager 动态获取默认数据源 - 改为延迟获取
 function getDefaultSourcesFromDb(): DataSourceType[] {
   try {
     const { getDataSourceManager } = require('@/lib/datasources');
     const mgr = getDataSourceManager();
-    return mgr.getEnabledSources();
+    const sources = mgr.getEnabledSources();
+    console.log('[Planner] defaultSources:', sources);
+    return sources;
   } catch {
-    return ['duckduckgo', 'rss-hackernews'];
+    console.error('[Planner] 获取默认数据源失败，回退到 rss-hackernews');
+    return ['rss-hackernews'];
   }
 }
 
 const DEFAULT_CONFIG: PlannerConfig = {
   useLLM: true,
-  defaultSources: getDefaultSourcesFromDb(),
+  defaultSources: [],  // 延迟初始化
+  getSources: getDefaultSourcesFromDb,  // 存储获取函数
 };
+
+/**
+ * 获取默认数据源（支持延迟加载）
+ */
+function getSources(config: PlannerConfig): DataSourceType[] {
+  if (config.getSources) {
+    return config.getSources();
+  }
+  return config.defaultSources.length > 0 ? config.defaultSources : getDefaultSourcesFromDb();
+}
 
 /**
  * Planner Agent 执行结果
@@ -102,7 +119,7 @@ async function planResearch(
 
     if (!config.useLLM || !hasLLMConfig || (needsApiKey && !hasApiKey)) {
       // 使用默认配置
-      return buildDefaultPlan(title, description, keywords, config.defaultSources);
+      return buildDefaultPlan(title, description, keywords, getSources(config));
     }
 
     // 更新进度
@@ -114,7 +131,7 @@ async function planResearch(
       currentItem: 'LLM 生成中...',
     });
 
-    // 1. 首先进行行业判断
+    // 1. 首先进行行业判断（包含意图分析）
     const industryResult = await detectIndustry({
       title,
       description,
@@ -123,12 +140,23 @@ async function planResearch(
 
     console.log(`[Planner] 行业判断: ${industryResult.detectedIndustry} (置信度: ${industryResult.confidence})`);
 
-    // 2. 使用 LLM 生成计划（传入行业信息）
+    // 记录意图分析结果
+    if (industryResult.intent) {
+      console.log(`[Planner] 意图分析: ${industryResult.intent} (清晰度: ${(industryResult.clarityScore || 0).toFixed(2)})`);
+    }
+    if (industryResult.coreTheme) {
+      console.log(`[Planner] 核心主题: ${industryResult.coreTheme}`);
+    }
+    if (industryResult.keywords && industryResult.keywords.length > 0) {
+      console.log(`[Planner] 提取关键词: ${industryResult.keywords.join(', ')}`);
+    }
+
+    // 2. 使用 LLM 生成计划（传入行业信息和意图）
     const searchPlan = await generateSearchPlan(
       title,
       description,
       keywords,
-      config.defaultSources,
+      getSources(config),
       industryResult
     );
 
@@ -187,21 +215,29 @@ async function generateSearchPlan(
   title: string,
   description?: string,
   keywords?: string[],
-  targetSources: DataSourceType[] = DEFAULT_CONFIG.defaultSources,
+  targetSources?: DataSourceType[],
   industryResult?: {
     detectedIndustry: string;
     confidence: number;
     reasoning: string;
     researchDimensions: string[];
     relatedIndustries?: string[];
+    intent?: string;
+    coreTheme?: string;
+    keywords?: string[];
+    clarityScore?: number;
   }
 ): Promise<SearchPlan> {
+  // 延迟获取数据源
+  const finalTargetSources = targetSources || getDefaultSourcesFromDb();
+
   const prompt = formatPrompt(PLAN_RESEARCH_PROMPT, { title, description });
 
-  // 添加关键词上下文
+  // 添加关键词上下文（优先使用 LLM 提取的关键词）
   let enhancedPrompt = prompt;
-  if (keywords && keywords.length > 0) {
-    enhancedPrompt += `\n\n【关键词】\n${keywords.join(', ')}`;
+  const mergedKeywords = industryResult?.keywords || keywords;
+  if (mergedKeywords && mergedKeywords.length > 0) {
+    enhancedPrompt += `\n\n【关键词】\n${mergedKeywords.join(', ')}`;
   }
 
   // 添加行业判断结果
@@ -215,6 +251,18 @@ async function generateSearchPlan(
     }
     if (industryResult.relatedIndustries && industryResult.relatedIndustries.length > 0) {
       enhancedPrompt += `- 相关行业: ${industryResult.relatedIndustries.join(', ')}\n`;
+    }
+
+    // 添加意图分析结果
+    if (industryResult.intent) {
+      enhancedPrompt += `\n【用户意图】\n`;
+      enhancedPrompt += `- 研究类型: ${industryResult.intent}\n`;
+      if (industryResult.coreTheme) {
+        enhancedPrompt += `- 核心主题: ${industryResult.coreTheme}\n`;
+      }
+      if (industryResult.clarityScore !== undefined) {
+        enhancedPrompt += `- 输入清晰度: ${(industryResult.clarityScore * 100).toFixed(0)}%\n`;
+      }
     }
   }
 
@@ -315,7 +363,7 @@ async function generateSearchPlan(
 
   return {
     queries,
-    targetSources,
+    targetSources: finalTargetSources,
     researchDimensions: (response.researchDimensions as string[]) || DEFAULT_DIMENSIONS,
     qualityThresholds,
   };
@@ -328,8 +376,10 @@ function buildDefaultPlan(
   title: string,
   description: string | undefined,
   keywords: string[] | undefined,
-  sources: DataSourceType[] = DEFAULT_CONFIG.defaultSources
+  sources?: DataSourceType[]
 ): PlannerResult {
+  // 确保有数据源
+  const finalSources = sources && sources.length > 0 ? sources : getDefaultSourcesFromDb();
   const queries = generateDefaultQueries(title);
 
   // 根据关键词扩展查询
@@ -350,7 +400,7 @@ function buildDefaultPlan(
     success: true,
     searchPlan: {
       queries,
-      targetSources: sources,
+      targetSources: finalSources,
       researchDimensions: DEFAULT_DIMENSIONS,
       qualityThresholds: DEFAULT_QUALITY_THRESHOLDS,
     },

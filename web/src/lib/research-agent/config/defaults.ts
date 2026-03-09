@@ -43,3 +43,17 @@ export const SEARCHER_DEFAULTS = {
   // 质量保障配置
   qualityGuarantee: QUALITY_GUARANTEE_CONFIG,
 } as const;
+
+/**
+ * 用户输入解析器配置
+ */
+export const PARSER_DEFAULTS = {
+  /** 模糊度阈值，低于此值需要解析 */
+  clarityThreshold: 0.6,
+  /** 最大关键词数 */
+  maxKeywords: 5,
+  /** 是否启用兜底 */
+  enableFallback: true,
+  /** 解析超时(ms) */
+  timeout: 10000,
+} as const;

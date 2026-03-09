@@ -67,6 +67,32 @@ function ProjectsContent() {
     }
   };
 
+  const deleteProject = async (projectId: string, projectTitle: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // 确认删除
+    if (!confirm(`确定要删除项目 "${projectTitle}" 吗？此操作不可恢复。`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/projects?id=${projectId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.success) {
+        // 刷新列表
+        fetchProjects();
+      } else {
+        alert('删除失败: ' + (data.error || '未知错误'));
+      }
+    } catch (error) {
+      console.error('Failed to delete project:', error);
+      alert('删除失败');
+    }
+  };
+
   const filteredProjects = filter === 'all'
     ? projects
     : projects.filter(p => p.status === filter);
@@ -246,6 +272,16 @@ function ProjectsContent() {
                       重试
                     </button>
                   )}
+                  <button
+                    className="delete-btn"
+                    onClick={(e) => deleteProject(project.id, project.title, e)}
+                    title="删除项目"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                  </button>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="chevron">
                     <path d="M9 18l6-6-6-6" />
                   </svg>
