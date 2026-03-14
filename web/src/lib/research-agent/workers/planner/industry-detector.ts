@@ -5,7 +5,7 @@
  */
 
 import { generateText } from '@/lib/llm';
-import { parseJsonFromLLM } from '@/lib/json-utils';
+import { parseJsonFromLLM, parseJsonWithRetry } from '@/lib/json-utils';
 import { calculateClarityScore, type ResearchIntent } from './user-input-parser';
 
 /**
@@ -140,27 +140,26 @@ ${description || '无'}
 ${keywords?.join(', ') || '无'}
 ${intentSection}
 
-请分析并返回纯 JSON 格式的结果，不要包含任何解释性文字或 Markdown 标记：
+请按以下 JSON 结构返回结果，只输出纯 JSON，不要有其他任何文字：
+
 {
   "detectedIndustry": "主要行业类别",
-  "confidence": 0-1 之间的置信度,
-  "reasoning": "判断理由",
-  "researchDimensions": ["维度1", "维度2", ...],
-  "relatedIndustries": ["相关行业1", "相关行业2"] (可选)
-  ${needsIntentAnalysis ? ',\n  "coreTheme": "核心主题",\n  "intent": "intent值",\n  "keywords": ["关键词1", "关键词2"]' : ''}
+  "confidence": 0.95,
+  "researchDimensions": ["维度1", "维度2"],
+  "relatedIndustries": ["相关行业1"]
+  ${needsIntentAnalysis ? ',\n  "coreTheme": "核心主题",\n  "intent": "product",\n  "keywords": ["关键词1"]' : ''}
 }
 
 请确保：
-1. 只输出 JSON，不要有其他文字
-2. 行业类别使用通用名称（如：B2B SaaS、消费者应用、硬件产品、医疗健康、金融服务、教育科技、电子商务、人工智能、游戏、汽车出行等）
-3. 研究维度应该与行业相关且有实际研究价值
-4. 如果产品跨多个行业，在 relatedIndustries 中列出
-5. JSON 字符串中不要包含换行符、制表符等特殊字符，只使用纯文本`;
+1. 只输出 JSON，不要有解释性文字
+2. 行业类别使用：B2B SaaS、消费者应用、硬件产品、医疗健康、金融服务、教育科技、电子商务、人工智能、游戏、汽车出行、通用
+3. researchDimensions 必须是字符串数组
+4. confidence 必须是 0-1 之间的数字
+5. 字符串中不要包含未转义的换行符
+6. 不要输出 reasoning 字段`;
 
   try {
-    const responseText = await generateText(prompt);
-
-    // 提取并解析 JSON
+    // 提取并解析 JSON（带重试机制）
     interface IndustryDetectionResult {
       detectedIndustry?: string;
       confidence?: number;
@@ -172,7 +171,12 @@ ${intentSection}
       keywords?: string[];
     }
 
-    const result = parseJsonFromLLM<IndustryDetectionResult>(responseText);
+    const result = await parseJsonWithRetry<IndustryDetectionResult>(
+      (p, maxTokens) => generateText(p, undefined, { maxTokens, jsonMode: true }),
+      prompt,
+      3
+      // 使用 parseJsonWithRetry 的默认值，会传递给 generateText，然后使用 config.maxTokens
+    );
 
     // 提取意图信息
     let intent: ResearchIntent | undefined;

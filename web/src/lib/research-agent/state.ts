@@ -167,7 +167,7 @@ export function createInitialState(
     pendingQueries: [],
     searchIteration: {
       currentRound: 1,
-      maxRounds: 3,
+      maxRounds: 5,
       coveredDimensions: [],
       missingDimensions: [],
       roundResults: [],

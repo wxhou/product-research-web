@@ -18,6 +18,8 @@ export interface PipelineStage {
   name: AgentName;
   /** 执行阶段 */
   execute(state: ResearchState): Promise<ResearchState>;
+  /** 期望的成功状态 */
+  successStatus?: ResearchState['status'];
 }
 
 /**
@@ -68,9 +70,10 @@ export function createPipeline(config: PipelineConfig): {
 
       try {
         // 重试循环
-        while (retryCount <= maxRetries) {
-          for (const stage of stages) {
-            console.log(`[Pipeline] Executing stage: ${stage.name}`);
+        let stageIndex = 0;
+        while (retryCount <= maxRetries && stageIndex < stages.length) {
+          const stage = stages[stageIndex];
+          console.log(`[Pipeline] Executing stage: ${stage.name}`);
 
             // 更新当前阶段
             currentState.currentStep = stage.name;
@@ -105,14 +108,56 @@ export function createPipeline(config: PipelineConfig): {
             if (currentState.status === 'pending' && currentState.currentStep === 'planner') {
               console.log(`[Pipeline] Restart triggered at stage ${stage.name}, retry count: ${retryCount + 1}`);
               retryCount++;
-              // 跳出内层循环，重新从 planner 开始
+              // 跳回从头开始
+              stageIndex = 0;
+              continue;
+            }
+
+            // 🔑 动态跳转逻辑：基于 successStatus
+            const expectedSuccessStatus = stage.successStatus || 'completed';
+            const targetStep = currentState.currentStep;
+
+            // 如果返回的状态与期望的不匹配，需要跳转
+            if (targetStep && currentState.status && currentState.status !== expectedSuccessStatus) {
+              const targetIndex = stages.findIndex(s => s.name === targetStep);
+
+              // 允许任意方向跳转，通过 maxRetries 防止无限循环
+              if (targetIndex !== -1 && targetIndex !== stageIndex) {
+                console.log(`[Pipeline] Dynamic routing: ${stage.name} → ${targetStep} (${currentState.status} != ${expectedSuccessStatus})`);
+                stageIndex = targetIndex;
+                continue;
+              }
+            }
+
+            // 正常推进到下一个 stage
+            stageIndex++;
+
+          // 如果所有 stage 都执行完（stageIndex >= stages.length）
+          if (stageIndex >= stages.length) {
+            // 检查是否需要重启（pending 状态）
+            if (currentState.status === 'pending') {
+              if (currentState.currentStep === 'planner') {
+                // 重启：回到 planner
+                retryCount++;
+                stageIndex = 0;
+                console.log(`[Pipeline] All stages completed, restarting from planner (retry ${retryCount})`);
+                continue;
+              } else {
+                // 根据 currentStep 跳转
+                const targetStep = currentState.currentStep;
+                const targetIndex = stages.findIndex(s => s.name === targetStep);
+                if (targetIndex !== -1) {
+                  stageIndex = targetIndex;
+                  console.log(`[Pipeline] All stages completed, jumping to ${targetStep}`);
+                  continue;
+                }
+              }
+            }
+
+            // 正常结束
+            if (currentState.status !== 'pending') {
               break;
             }
-          }
-
-          // 如果所有阶段都完成且状态不是 pending，跳出重试循环
-          if (currentState.status !== 'pending') {
-            break;
           }
 
           // 防止无限循环

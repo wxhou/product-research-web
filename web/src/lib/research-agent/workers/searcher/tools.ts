@@ -66,7 +66,7 @@ function toResearchSearchResult(
   // 验证 source 是否是有效的 DataSourceType
   const validSources = [
     'rss-hackernews', 'rss-techcrunch', 'rss-theverge', 'rss-wired', 'rss-producthunt',
-    'rss-cnblogs', 'hackernews-api'
+    'rss-cnblogs'
   ];
   const sourceStr = dsResult.source;
   const source = validSources.includes(sourceStr)
@@ -267,5 +267,4 @@ export const SOURCE_TIMEOUTS: Partial<Record<DataSourceType, number>> = {
   'rss-wired': 15000,
   'rss-producthunt': 15000,
   'rss-cnblogs': 15000,
-  'hackernews-api': 15000,
 };

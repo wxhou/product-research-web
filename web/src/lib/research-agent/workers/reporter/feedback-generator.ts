@@ -101,7 +101,7 @@ async function generateFeedback(input: FeedbackGeneratorInput): Promise<Generate
  * 快速反馈生成（规则基础，降级方案）
  */
 function generateFastFeedback(input: FeedbackGeneratorInput): GeneratedFeedback {
-  const { qualityResult, currentReport, analysis } = input;
+  const { qualityResult } = input;
 
   // 1. 按优先级排序问题
   const sortedItems = sortIssuesByPriority(qualityResult);

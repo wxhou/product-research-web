@@ -6,7 +6,7 @@
 
 import type { SearchResult, ExtractionResult } from '../../types';
 import { generateText } from '@/lib/llm';
-import { parseJsonFromLLM } from '@/lib/json-utils';
+import { parseJsonWithRetry } from '@/lib/json-utils';
 
 /**
  * URL 可信度评级表
@@ -112,14 +112,17 @@ ${researchDimensions?.length ? `## 研究维度\n${researchDimensions.join(', ')
 2. JSON 数组中的字符串不要包含换行符或特殊字符`;
 
   try {
-    const responseText = await generateText(prompt);
-
-    // 使用健壮的 JSON 解析
-    const result = parseJsonFromLLM<{
+    // 使用带重试的 JSON 解析
+    const result = await parseJsonWithRetry<{
       relevanceScore: number;
       confidenceScore: number;
       issues: string[];
-    }>(responseText);
+    }>(
+      (p, maxTokens) => generateText(p, undefined, { maxTokens, jsonMode: true }),
+      prompt,
+      3,
+      8192
+    );
 
     if (!result) {
       return { score: 0.5, confidence: 0.3, issues: ['无法解析评估结果'] };

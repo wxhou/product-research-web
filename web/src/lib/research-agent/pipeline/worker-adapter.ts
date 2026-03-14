@@ -46,6 +46,7 @@ export function createWorkerStage(config: WorkerConfig): PipelineStage {
 
   return {
     name,
+    successStatus,
     async execute(state: ResearchState): Promise<ResearchState> {
       console.log(`[Worker:${name}] Starting execution`);
 
@@ -60,12 +61,12 @@ export function createWorkerStage(config: WorkerConfig): PipelineStage {
         };
 
         // 更新进度
-        if (progress !== undefined) {
+        if (progress !== undefined && result.progress === undefined) {
           newState.progress = progress;
         }
 
         // 更新进度消息
-        if (progressMessage) {
+        if (progressMessage && !result.progressMessage) {
           newState.progressMessage = progressMessage;
         }
 
@@ -81,7 +82,8 @@ export function createWorkerStage(config: WorkerConfig): PipelineStage {
           newState.status = successStatus;
         }
 
-        newState.currentStep = name;
+        // 优先使用 worker 显式返回的阶段（如重启时回到 planner）
+        newState.currentStep = result.currentStep ?? name;
         newState.updatedAt = new Date().toISOString();
 
         console.log(`[Worker:${name}] Completed successfully`);

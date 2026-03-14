@@ -68,7 +68,7 @@ interface IterationRecord {
  * 默认配置
  */
 const DEFAULT_CONFIG: Required<IterationConfig> = {
-  maxIterations: 3,
+  maxIterations: 5,
   passThreshold: 75,
   warnThreshold: 60,
   minImprovement: 5,

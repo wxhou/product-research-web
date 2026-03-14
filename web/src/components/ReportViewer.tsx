@@ -98,6 +98,12 @@ function MarkdownPre(props: React.ComponentPropsWithoutRef<'pre'> & { dataLangua
 function sanitizeReportContent(content: string): string {
   let result = content;
 
+  // 0. 移除嵌套的 ```markdown 代码块（报告被错误地嵌套在代码块中）
+  // 匹配从 ```markdown 开始到第一个 ``` 结束的内容
+  result = result.replace(/```markdown\s*\n([\s\S]*?)```\n?/g, '$1');
+  // 也处理没有语言标记的 ``` 代码块（只处理内容开头的）
+  result = result.replace(/^```\s*\n([\s\S]*?)```\s*$/m, '$1');
+
   // 1. 替换 [object Object] 为 "暂无数据"
   result = result.replace(/\[object Object\]/g, '暂无数据');
 

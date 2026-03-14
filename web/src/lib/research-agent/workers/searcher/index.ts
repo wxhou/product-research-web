@@ -18,9 +18,10 @@ import { updateProgress } from '../../progress/tracker';
 import { createCancelCheck } from '../../cancellation/handler';
 import { SEARCHER_DEFAULTS } from '../../config/defaults';
 import { generateText } from '@/lib/llm';
-import { parseJsonFromLLM } from '@/lib/json-utils';
+import { parseJsonWithRetry } from '@/lib/json-utils';
 import { calculateCredibility, calculateRelevance } from '../../quality/scorer';
 import { estimateQuality, shouldContinueSearch } from './quality-estimator';
+import { evaluateSearchResults, shouldResearch } from './result-evaluator';
 
 /**
  * 带超时的 Promise 执行
@@ -81,7 +82,7 @@ export interface SearcherConfig {
 
 /** 默认配置 - 针对90分报告质量 */
 const DEFAULT_CONFIG: SearcherConfig = {
-  enabledSources: getDefaultSources() as SearchQuery['dimension'][],
+  enabledSources: getDefaultSources(),
   maxResults: SEARCHER_DEFAULTS.maxResults,
   minQualityScore: SEARCHER_DEFAULTS.minQualityScore,
   enableDeduplication: true,
@@ -165,13 +166,14 @@ async function executeSearch(
 
     // 迭代搜索
     while (currentRound <= iteration.maxRounds) {
-      console.log(`[Searcher] 第 ${currentRound} 轮搜索，待查询: ${pendingQueries.length}`);
+      const totalInRound = pendingQueries.length;
+      console.log(`[Searcher] 第 ${currentRound} 轮搜索，待查询: ${totalInRound}`);
 
       // 更新进度
       await updateProgress(projectId, {
         stage: 'searching',
         step: `第 ${currentRound} 轮搜索`,
-        totalItems: pendingQueries.length,
+        totalItems: totalInRound,
         completedItems: 0,
         currentItem: pendingQueries[0]?.query || '',
       });
@@ -184,7 +186,7 @@ async function executeSearch(
       const roundResultsList: SearchResult[] = [];
       const failedQueries: SearchQuery[] = [];
 
-      for (let i = 0; i < pendingQueries.length; i += batchSize) {
+      for (let i = 0; i < totalInRound; i += batchSize) {
         // 检查取消
         if (isCancelled()) {
           return {
@@ -199,9 +201,9 @@ async function executeSearch(
 
         await updateProgress(projectId, {
           stage: 'searching',
-          step: `第 ${currentRound} 轮: ${Math.min(i + batchSize, pendingQueries.length)}/${pendingQueries.length}`,
-          totalItems: pendingQueries.length,
-          completedItems: i,
+          step: `第 ${currentRound} 轮: ${Math.min(i + batchSize, totalInRound)}/${totalInRound}`,
+          totalItems: totalInRound,
+          completedItems: Math.min(i, totalInRound),
           currentItem: batch[0]?.query || '',
         });
 
@@ -271,6 +273,21 @@ async function executeSearch(
         researchDimensions
       );
       console.log(`[Searcher] 预估产出: ${qualityEstimate.estimatedOutputCount} 个, 建议: ${qualityEstimate.recommendation}`);
+
+      // ==================== LLM 质量门禁评估 ====================
+      // 使用 LLM 评估搜索结果质量
+      try {
+        const llmEvaluation = await evaluateSearchResults({ searchResults: allResults });
+        console.log(`[Searcher] LLM质量评估: 高质量${llmEvaluation.summary.highQuality.length}个, 中质量${llmEvaluation.summary.mediumQuality.length}个, 低质量${llmEvaluation.summary.lowQuality.length}个`);
+        console.log(`[Searcher] LLM建议: ${llmEvaluation.summary.action}`);
+
+        // 如果 LLM 认为需要重做搜索，且还未达到最大轮次，则继续搜索
+        if (shouldResearch(llmEvaluation) && currentRound < iteration.maxRounds) {
+          console.log(`[Searcher] LLM质量门禁触发：需要重新搜索`);
+        }
+      } catch (error) {
+        console.warn(`[Searcher] LLM质量评估失败: ${error instanceof Error ? error.message : '未知错误'}`);
+      }
 
       // 检查是否完成
       if (quality.isComplete || currentRound >= iteration.maxRounds) {
@@ -495,18 +512,43 @@ ${missingDimensions.map((d) => `- ${d}`).join('\n')}
 [{"query": "搜索查询内容", "dimension": "维度名称", "purpose": "查询目的", "priority": 1-5}]`;
 
   try {
-    const responseText = await generateText(prompt);
-    const queries = parseJsonFromLLM<Array<{
+    const queries = await parseJsonWithRetry<unknown>(
+      (p, maxTokens) => generateText(p, undefined, { maxTokens, jsonMode: true }),
+      prompt,
+      3,
+      8192
+    );
+
+    // 兼容模型返回对象包裹数组，如 { "xxx_queries": [ ... ] }
+    let queryItems: Array<{
       query: string;
       dimension: string;
       purpose: string;
       priority: number | string;
-    }>>(responseText, []);
+    }> = [];
+
+    if (Array.isArray(queries)) {
+      queryItems = queries as Array<{ query: string; dimension: string; purpose: string; priority: number | string }>;
+    } else if (queries && typeof queries === 'object') {
+      const obj = queries as Record<string, unknown>;
+      if (Array.isArray(obj.queries)) {
+        queryItems = obj.queries as Array<{ query: string; dimension: string; purpose: string; priority: number | string }>;
+      } else {
+        const firstArrayValue = Object.values(obj).find(v => Array.isArray(v)) as unknown[] | undefined;
+        if (firstArrayValue) {
+          queryItems = firstArrayValue as Array<{ query: string; dimension: string; purpose: string; priority: number | string }>;
+        }
+      }
+    }
+
+    if (queryItems.length === 0) {
+      throw new Error('LLM 未返回可识别的查询数组');
+    }
 
     // 将字符串优先级转换为数字
     const priorityMap: Record<string, number> = { high: 1, medium: 2, low: 3 };
 
-    return queries.map((q, idx) => ({
+    return queryItems.map((q, idx) => ({
       id: `iter-${Date.now()}-${idx}`,
       query: String(q.query || ''),
       dimension: String(q.dimension || missingDimensions[idx % missingDimensions.length]),

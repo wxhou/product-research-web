@@ -43,7 +43,7 @@ export class SearxngService implements SearchService {
 
   async search(query: string, limit = 10): Promise<SearchResult[]> {
     try {
-      const url = `${this.baseUrl}/search?q=${encodeURIComponent(query)}&format=json&engines=google,bing,ddg&language=en`;
+      const url = `${this.baseUrl}/search?q=${encodeURIComponent(query)}&format=json`;
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 15000); // 15秒超时

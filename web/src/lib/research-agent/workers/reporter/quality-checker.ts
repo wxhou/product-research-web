@@ -36,7 +36,7 @@ export interface ReportQualityResult {
  * 迭代配置
  */
 export interface IterationConfig {
-  maxIterations?: number;      // 默认 3
+  maxIterations?: number;      // 默认 5
   passThreshold?: number;     // 默认 75
   warnThreshold?: number;     // 默认 60
   minImprovement?: number;    // 默认 5
@@ -46,7 +46,7 @@ export interface IterationConfig {
  * 默认配置
  */
 const DEFAULT_CONFIG: Required<IterationConfig> = {
-  maxIterations: 3,
+  maxIterations: 5,
   passThreshold: 75,
   warnThreshold: 60,
   minImprovement: 5,
@@ -239,7 +239,6 @@ function ruleBasedDepthEvaluation(report: string): number {
  */
 function evaluateActionability(report: string): number {
   let score = 0;
-  const issues: string[] = [];
 
   // 1. 战略建议数量
   const recommendationMatches = report.match(/^\d+[\.、]\s*.+/gm);
@@ -249,33 +248,24 @@ function evaluateActionability(report: string): number {
     score += 25;
   } else if (recommendationCount >= 1) {
     score += 15;
-    issues.push(`战略建议仅 ${recommendationCount} 条，建议至少 3 条`);
-  } else {
-    issues.push('缺少战略建议');
   }
 
   // 2. 量化目标检查
   const hasQuantifiedGoals = /\d+(\.\d+)?%|\$\d+|¥\d+|\d+倍/.test(report);
   if (hasQuantifiedGoals) {
     score += 25;
-  } else {
-    issues.push('战略建议缺少量化目标');
   }
 
   // 3. 实施时间表检查
   const hasTimeline = /Q[1-4]|\d+月|第[一二三]季度|\d+-\d+月/.test(report);
   if (hasTimeline) {
     score += 25;
-  } else {
-    issues.push('战略建议缺少实施时间表');
   }
 
   // 4. 风险评估检查
   const hasRiskAssessment = /风险|高.*中.*低|低.*中.*高/.test(report);
   if (hasRiskAssessment) {
     score += 25;
-  } else {
-    issues.push('战略建议缺少风险评估');
   }
 
   return Math.min(100, score);

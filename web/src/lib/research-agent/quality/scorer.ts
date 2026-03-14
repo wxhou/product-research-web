@@ -192,7 +192,6 @@ const SOURCE_CREDIBILITY_WEIGHTS: Record<string, number> = {
   'social': 0.3,
   'rss-cnblogs': 0.5,
   'rss-juejin': 0.5,
-  'hackernews-api': 0.6,
 };
 
 /**

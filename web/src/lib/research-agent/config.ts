@@ -26,7 +26,7 @@ export interface ResearchAgentEnvConfig {
 export function getResearchAgentConfig(): ResearchAgentEnvConfig {
   return {
     enableIteration: process.env.REPORTER_ENABLE_ITERATION === 'true',
-    maxIterations: parseInt(process.env.REPORTER_MAX_ITERATIONS || '3', 10),
+    maxIterations: parseInt(process.env.REPORTER_MAX_ITERATIONS || '5', 10),
     passThreshold: parseInt(process.env.REPORTER_PASS_THRESHOLD || '75', 10),
     warnThreshold: parseInt(process.env.REPORTER_WARN_THRESHOLD || '60', 10),
     minImprovement: parseInt(process.env.REPORTER_MIN_IMPROVEMENT || '5', 10),

@@ -38,8 +38,6 @@ export type DataSourceType =
   // RSS 订阅
   | 'rss-hackernews' | 'rss-techcrunch' | 'rss-theverge' | 'rss-wired' | 'rss-producthunt'
   | 'rss-cnblogs' | 'rss-juejin' | 'rss-googlenews' | 'rss-mittechreview'
-  // Hacker News
-  | 'hackernews-api'
   // SearXNG
   | 'searxng';
 
@@ -166,54 +164,6 @@ class RSSService implements SearchService {
 
   private stripHtml(html: string): string {
     return html.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
-  }
-}
-
-// ==================== Hacker News 官方 API====================
-
-class HackerNewsAPIService implements SearchService {
-  name = 'Hacker News API';
-  type = 'hackernews-api' as DataSourceType;
-
-  async search(query: string, limit = 10): Promise<SearchResult[]> {
-    try {
-      // 搜索 API
-      const res = await fetch(
-        `https://hacker-news.firebaseio.com/v0/search.json?q=${encodeURIComponent(query)}&tags=story&limit=${limit * 2}`,
-        { signal: AbortSignal.timeout(15000) }
-      );
-
-      // 401/403 表示需要认证或被拒绝，静默返回空结果
-      if (res.status === 401 || res.status === 403) {
-        console.warn('Hacker News API requires authentication, skipping...');
-        return [];
-      }
-
-      if (!res.ok) {
-        console.warn(`Hacker News API returned ${res.status}, skipping...`);
-        return [];
-      }
-
-      const data = await res.json();
-      const queryLower = query.toLowerCase();
-
-      return (data || [])
-        .filter((item: any) => {
-          const title = item.title?.toLowerCase() || '';
-          return title.includes(queryLower);
-        })
-        .slice(0, limit)
-        .map((item: any) => ({
-          title: item.title || query,
-          url: item.url || `https://news.ycombinator.com/item?id=${item.objectID}`,
-          content: `Score: ${item.points || 0} | Comments: ${item.num_comments || 0}`,
-          source: 'hackernews-api',
-          publishedAt: item.created_at,
-        }));
-    } catch (error) {
-      // 静默处理，不记录错误
-      return [];
-    }
   }
 }
 
@@ -382,7 +332,6 @@ export class DataSourceManager {
     ['rss-mittechreview', () => new RSSService()],
     ['rss-cnblogs', () => new CnBlogsRSSService()],
     ['rss-juejin', () => new RSSService()],
-    ['hackernews-api', () => new HackerNewsAPIService()],
     ['searxng', () => new (require('./searxng').SearxngService)()],
   ]);
 

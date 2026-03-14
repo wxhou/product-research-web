@@ -48,6 +48,7 @@ task-data/
 data/research.db
 **/CLAUDE.md
 .claude/
+.github/
 .vscode/
 openspec/
 scripts/

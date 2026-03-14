@@ -34,7 +34,7 @@ export const SEARCHER_DEFAULTS = {
   searchRounds: 10,
   targetDataPoints: 100,
   // 多轮迭代配置
-  maxIterations: 3,                    // 最大迭代轮次
+  maxIterations: 5,                    // 最大搜索迭代轮次 (从3改为5)
   qualityThreshold: SEARCH_QUALITY_THRESHOLDS,
   // 成本保护
   maxTotalQueries: 50,                 // 最大总查询数

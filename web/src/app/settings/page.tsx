@@ -111,13 +111,30 @@ export default function SettingsPage() {
     baseUrl?: string;
     temperature: number;
     timeout: number;
+    maxTokens?: number;
+    enableStructuredOutput?: boolean;
   } | null>(null);
   const [llmBaseUrl, setLlmBaseUrl] = useState('');
   const [llmApiKey, setLlmApiKey] = useState('');
   const [llmModelName, setLlmModelName] = useState('');
   const [llmTemperature, setLlmTemperature] = useState(0.7);
   const [llmTimeout, setLlmTimeout] = useState(120);
+  const [llmMaxTokens, setLlmMaxTokens] = useState(262144);
+  const [llmStructuredOutput, setLlmStructuredOutput] = useState(true);
   const [llmSaving, setLlmSaving] = useState(false);
+
+  // 报告质量设置状态
+  const [qualitySettings, setQualitySettings] = useState({
+    autoCheck: true,
+    autoKeywords: true,
+    autoReferences: true,
+    consistencyCheck: true,
+    iterativeOptimization: false,
+    enableROI: false,
+    enableImplementation: false,
+    minQualityScore: 65,
+  });
+  const [qualitySaving, setQualitySaving] = useState(false);
 
   const router = useRouter();
   const { isAdmin, isAuthenticated, loading: authLoading } = useAuth();
@@ -162,6 +179,7 @@ export default function SettingsPage() {
     if (isAuthenticated) {
       fetchDataSources();
       fetchLLMConfig();
+      fetchQualitySettings();
     }
   }, [isAuthenticated, fetchDataSources]);
 
@@ -180,6 +198,8 @@ export default function SettingsPage() {
         setLlmModelName(config.modelName || '');
         setLlmTemperature(config.temperature ?? 0.7);
         setLlmTimeout(config.timeout ?? 120);
+        setLlmMaxTokens(config.maxTokens ?? 262144);
+        setLlmStructuredOutput(config.enableStructuredOutput ?? true);
       }
     } catch (error) {
       console.error('Failed to fetch LLM config:', error);
@@ -197,6 +217,8 @@ export default function SettingsPage() {
         modelName: llmModelName || null,
         temperature: llmTemperature,
         timeout: llmTimeout,
+        maxTokens: llmMaxTokens,
+        enableStructuredOutput: llmStructuredOutput,
       };
       const res = await fetch('/api/settings/llm', {
         method: 'POST',
@@ -216,6 +238,84 @@ export default function SettingsPage() {
       showMessage('error', '保存失败');
     } finally {
       setLlmSaving(false);
+    }
+  };
+
+  // 获取质量设置
+  const fetchQualitySettings = async () => {
+    try {
+      const res = await fetch('/api/settings/quality');
+      const data = await res.json();
+      if (data.success && data.data) {
+        setQualitySettings({
+          autoCheck: data.data.autoCheck ?? true,
+          autoKeywords: data.data.autoKeywords ?? true,
+          autoReferences: data.data.autoReferences ?? true,
+          consistencyCheck: data.data.consistencyCheck ?? true,
+          iterativeOptimization: data.data.iterativeOptimization ?? false,
+          enableROI: data.data.enableROI ?? false,
+          enableImplementation: data.data.enableImplementation ?? false,
+          minQualityScore: data.data.qualityGate?.minQualityScore ?? 65,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to fetch quality settings:', error);
+    }
+  };
+
+  // 保存质量设置
+  const saveQualitySettings = async () => {
+    setQualitySaving(true);
+    try {
+      const config = {
+        autoCheck: qualitySettings.autoCheck,
+        autoKeywords: qualitySettings.autoKeywords,
+        autoReferences: qualitySettings.autoReferences,
+        consistencyCheck: qualitySettings.consistencyCheck,
+        iterativeOptimization: qualitySettings.iterativeOptimization,
+        enableROI: qualitySettings.enableROI,
+        enableImplementation: qualitySettings.enableImplementation,
+        qualityGate: {
+          enabled: qualitySettings.autoCheck,
+          minQualityScore: qualitySettings.minQualityScore,
+          skippedChecks: [],
+          consistency: {
+            checkDuplicateMetrics: qualitySettings.consistencyCheck,
+            checkPercentageOverflow: qualitySettings.consistencyCheck,
+            checkLogicalContradictions: qualitySettings.consistencyCheck,
+            enableLLMDetection: qualitySettings.consistencyCheck,
+          },
+          structural: {
+            enabled: true,
+            requiredSections: ['执行摘要', '市场分析', '竞争格局', '功能分析', 'SWOT分析', '战略建议'],
+            minSectionLength: 300,
+            missingSectionPenalty: 20,
+            insufficientContentPenalty: 10,
+          },
+          depth: {
+            enabled: true,
+            minDataPoints: 5,
+            requireComparison: true,
+            requireTrend: false,
+          },
+        },
+      };
+      const res = await fetch('/api/settings/quality', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showMessage('success', '质量设置保存成功');
+      } else {
+        showMessage('error', '保存失败: ' + (data.error || '未知错误'));
+      }
+    } catch (error) {
+      console.error('Failed to save quality settings:', error);
+      showMessage('error', '保存失败');
+    } finally {
+      setQualitySaving(false);
     }
   };
 
@@ -406,18 +506,28 @@ export default function SettingsPage() {
             <h2>大模型配置</h2>
             <p>配置用于 AI 分析和报告生成的大模型 API</p>
           </div>
-          {llmConfig?.modelName && (
-            <div className="current-model-badge">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6M4.22 19.78l4.24-4.24M15.54 8.46l4.24-4.24" />
-              </svg>
-              <span>
-                当前使用: <strong>{llmConfig.modelName}</strong>
-                {llmConfig.temperature !== 0.7 && ` (温度: ${llmConfig.temperature})`}
-              </span>
-            </div>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {llmConfig?.modelName && (
+              <div className="current-model-badge">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6M4.22 19.78l4.24-4.24M15.54 8.46l4.24-4.24" />
+                </svg>
+                <span>
+                  当前使用: <strong>{llmConfig.modelName}</strong>
+                  {llmConfig.temperature !== 0.7 && ` (温度: ${llmConfig.temperature})`}
+                </span>
+              </div>
+            )}
+            <button
+              className="btn btn-primary"
+              id="save-llm"
+              onClick={saveLLMConfig}
+              disabled={llmSaving}
+            >
+              {llmSaving ? '保存中...' : '保存配置'}
+            </button>
+          </div>
         </div>
 
         <div className="preference-card card">
@@ -561,7 +671,7 @@ export default function SettingsPage() {
                 <p>API 请求超时 (秒)</p>
               </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <input
                 type="number"
                 className="input"
@@ -570,17 +680,69 @@ export default function SettingsPage() {
                 max="300"
                 value={llmTimeout}
                 onChange={(e) => setLlmTimeout(parseInt(e.target.value) || 120)}
+                style={{ width: '80px' }}
+              />
+              <span style={{ fontSize: '12px', color: '#666' }}>秒</span>
+            </div>
+          </div>
+
+          <div className="preference-item">
+            <div className="preference-info">
+              <div className="preference-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                </svg>
+              </div>
+              <div>
+                <h3>最大输出 Tokens</h3>
+                <p>LLM 输出的最大 token 数</p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="number"
+                className="input"
+                id="maxTokens"
+                min="256"
+                max="262144"
+                value={llmMaxTokens}
+                onChange={(e) => setLlmMaxTokens(parseInt(e.target.value) || 262144)}
                 style={{ width: '100px' }}
               />
-              <button 
-                className="btn btn-primary" 
-                id="save-llm"
-                onClick={saveLLMConfig}
-                disabled={llmSaving}
-              >
-                {llmSaving ? '保存中...' : '保存配置'}
-              </button>
+              <span style={{ fontSize: '12px', color: '#666' }}>tokens</span>
             </div>
+          </div>
+
+          <div className="preference-item">
+            <div className="preference-info">
+              <div className="preference-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 2v4" />
+                  <path d="M12 18v4" />
+                  <path d="M4.93 4.93l2.83 2.83" />
+                  <path d="M16.24 16.24l2.83 2.83" />
+                  <path d="M2 12h4" />
+                  <path d="M18 12h4" />
+                  <path d="M4.93 19.07l2.83-2.83" />
+                  <path d="M16.24 7.76l2.83-2.83" />
+                </svg>
+              </div>
+              <div>
+                <h3>结构化输出开关</h3>
+                <p>JSON 任务自动启用 response_format，不支持时自动回退</p>
+              </div>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <input
+                type="checkbox"
+                checked={llmStructuredOutput}
+                onChange={(e) => setLlmStructuredOutput(e.target.checked)}
+              />
+              <span style={{ fontSize: '12px', color: '#666' }}>
+                {llmStructuredOutput ? '已开启' : '已关闭'}
+              </span>
+            </label>
           </div>
         </div>
       </section>
@@ -606,6 +768,215 @@ export default function SettingsPage() {
               <option value="zh">中文</option>
               <option value="en">English</option>
             </select>
+          </div>
+        </div>
+      </section>
+
+      {/* 报告质量设置 */}
+      <section className="settings-section">
+        <div className="section-header">
+          <div className="section-info">
+            <h2>报告质量</h2>
+            <p>配置报告自动质量检查和增强功能</p>
+          </div>
+          <button
+            className="btn btn-primary"
+            onClick={saveQualitySettings}
+            disabled={qualitySaving}
+          >
+            {qualitySaving ? '保存中...' : '保存设置'}
+          </button>
+        </div>
+
+        <div className="settings-group">
+          <h3>自动增强</h3>
+          <p className="group-desc">报告生成时自动添加的内容</p>
+
+          <div className="preference-item">
+            <div className="preference-info">
+              <div className="preference-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+              </div>
+              <div>
+                <h3>自动提取关键词</h3>
+                <p>报告生成后自动提取核心技术术语作为关键词</p>
+              </div>
+            </div>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={qualitySettings.autoKeywords}
+                onChange={(e) => setQualitySettings(prev => ({ ...prev, autoKeywords: e.target.checked }))}
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div className="preference-item">
+            <div className="preference-info">
+              <div className="preference-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                </svg>
+              </div>
+              <div>
+                <h3>自动提取参考文献</h3>
+                <p>根据报告中的引用标注自动生成参考文献列表</p>
+              </div>
+            </div>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={qualitySettings.autoReferences}
+                onChange={(e) => setQualitySettings(prev => ({ ...prev, autoReferences: e.target.checked }))}
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div className="settings-group">
+          <h3>质量检查</h3>
+          <p className="group-desc">报告生成后的质量验证</p>
+
+          <div className="preference-item">
+            <div className="preference-info">
+              <div className="preference-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <h3>启用质量检查</h3>
+                <p>自动检查报告的结构完整性、分析深度等</p>
+              </div>
+            </div>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={qualitySettings.autoCheck}
+                onChange={(e) => setQualitySettings(prev => ({ ...prev, autoCheck: e.target.checked }))}
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div className="preference-item">
+            <div className="preference-info">
+              <div className="preference-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                </svg>
+              </div>
+              <div>
+                <h3>数据一致性检查</h3>
+                <p>检测报告中的数据矛盾、百分比溢出等问题</p>
+              </div>
+            </div>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={qualitySettings.consistencyCheck}
+                onChange={(e) => setQualitySettings(prev => ({ ...prev, consistencyCheck: e.target.checked }))}
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div className="preference-item">
+            <div className="preference-info">
+              <div className="preference-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+              </div>
+              <div>
+                <h3>迭代优化</h3>
+                <p>根据质量评分自动迭代优化报告内容</p>
+              </div>
+            </div>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={qualitySettings.iterativeOptimization}
+                onChange={(e) => setQualitySettings(prev => ({ ...prev, iterativeOptimization: e.target.checked }))}
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div className="preference-item">
+            <div className="preference-info">
+              <div className="preference-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M13 7h8m0 0v8m0-8l-8 4-6 8-4-6" />
+                </svg>
+              </div>
+              <div>
+                <h3>最低质量分数</h3>
+                <p>质量门禁阈值，低于此分数将提示改进</p>
+              </div>
+            </div>
+            <input
+              type="number"
+              className="input number-input"
+              value={qualitySettings.minQualityScore}
+              onChange={(e) => setQualitySettings(prev => ({ ...prev, minQualityScore: parseInt(e.target.value) || 65 }))}
+              min={0}
+              max={100}
+              style={{ width: '80px' }}
+            />
+          </div>
+        </div>
+
+        <div className="settings-group">
+          <h3>高级分析</h3>
+          <p className="group-desc">可选的高级报告增强功能（需要更长生成时间）</p>
+
+          <div className="preference-item">
+            <div className="preference-info">
+              <div className="preference-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div>
+                <h3>ROI 分析</h3>
+                <p>自动计算投资回报率和敏感性分析</p>
+              </div>
+            </div>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={qualitySettings.enableROI}
+                onChange={(e) => setQualitySettings(prev => ({ ...prev, enableROI: e.target.checked }))}
+              />
+              <span className="toggle-slider"></span>
+            </label>
+          </div>
+
+          <div className="preference-item">
+            <div className="preference-info">
+              <div className="preference-icon">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                </svg>
+              </div>
+              <div>
+                <h3>实施计划</h3>
+                <p>自动生成MVP定义、里程碑和资源配置建议</p>
+              </div>
+            </div>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={qualitySettings.enableImplementation}
+                onChange={(e) => setQualitySettings(prev => ({ ...prev, enableImplementation: e.target.checked }))}
+              />
+              <span className="toggle-slider"></span>
+            </label>
           </div>
         </div>
       </section>

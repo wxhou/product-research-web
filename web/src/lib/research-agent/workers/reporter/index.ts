@@ -24,6 +24,10 @@ import { updateProgress } from '../../progress/tracker';
 import { createCancelCheck } from '../../cancellation/handler';
 import { getFileStorageService } from '@/lib/file-storage';
 import { createIterativeRefiner, type IterationConfig } from './iterative-refiner';
+import { extractKeywordsFromReport } from './keywords-extractor';
+import { extractReferences, generateReferencesSection } from './references-generator';
+import { createROICalculator } from './roi/calculator';
+import { createImplementationPlanner } from './implementation/planner';
 
 /**
  * Reporter Agent 配置
@@ -53,7 +57,7 @@ const DEFAULT_CONFIG: ReporterConfig = {
   maxRetries: 3,
   enableIteration: false,
   iterationConfig: {
-    maxIterations: 3,
+    maxIterations: 5,
     passThreshold: 75,
     warnThreshold: 60,
     minImprovement: 5,
@@ -169,6 +173,19 @@ async function executeReport(
         error: '报告生成被用户取消',
       };
     }
+
+    // 增强报告：补充关键词和参考文献
+    await updateProgress(projectId, {
+      stage: 'reporting',
+      step: '增强报告质量',
+      totalItems: totalSteps,
+      completedItems: baseSteps - 1,
+      currentItem: '提取关键词和参考文献',
+    });
+
+    fullReport = await enhanceReport(fullReport, context.title, context.title, undefined, {
+      // 保留基本的一致性检查和参考文献验证，禁用重复功能
+    });
 
     // 迭代优化（如果启用）
     let iterationInfo: ReporterResult['iterationInfo'];
@@ -393,6 +410,101 @@ function generateTitleBlock(title: string, keywords: string[]): string {
 
 **关键词**: ${keywords.join(', ')}
 **生成时间**: ${new Date().toLocaleString('zh-CN')}`;
+}
+
+/**
+ * 增强报告：补充关键词、参考文献、ROI和实施计划
+ *
+ * 如果关键词为空，从报告内容自动提取
+ * 如果报告中有引用标注，生成参考文献章节
+ * 可选添加ROI分析和实施计划
+ */
+async function enhanceReport(
+  report: string,
+  existingKeywords: string[],
+  enableKeywordsExtraction: boolean = true,
+  enableReferencesExtraction: boolean = true,
+  options?: {
+    enableROI?: boolean;
+    enableImplementation?: boolean;
+    solutionName?: string;
+    industry?: string;
+  }
+): Promise<string> {
+  let enhancedReport = report;
+
+  // 1. 处理关键词
+  if (existingKeywords.length === 0 && enableKeywordsExtraction) {
+    console.log('[Reporter] 关键词为空，尝试从报告内容提取...');
+    try {
+      const extractedKeywords = await extractKeywordsFromReport(report);
+      if (extractedKeywords.length > 0) {
+        // 替换标题块中的关键词
+        const keywordLine = `**关键词**: ${extractedKeywords.join(', ')}`;
+        enhancedReport = enhancedReport.replace(
+          /\*\*关键词\*\*: \[\]/,
+          keywordLine
+        );
+        console.log('[Reporter] 提取到关键词:', extractedKeywords.join(', '));
+      }
+    } catch (error) {
+      console.warn('[Reporter] 关键词提取失败:', error);
+    }
+  }
+
+  // 2. 处理参考文献
+  if (enableReferencesExtraction) {
+    console.log('[Reporter] 提取参考文献...');
+    try {
+      const references = await extractReferences(report);
+      if (references.length > 0) {
+        const referencesSection = generateReferencesSection(references);
+        // 检查报告是否已有参考文献章节
+        if (!enhancedReport.includes('## 参考文献')) {
+          enhancedReport += referencesSection;
+          console.log('[Reporter] 添加了参考文献章节，共', references.length, '条');
+        }
+      }
+    } catch (error) {
+      console.warn('[Reporter] 参考文献提取失败:', error);
+    }
+  }
+
+  // 3. 添加 ROI 分析（可选）
+  if (options?.enableROI && options.solutionName) {
+    console.log('[Reporter] 生成 ROI 分析...');
+    try {
+      const roiCalculator = createROICalculator();
+      const roiResult = await roiCalculator.calculate({
+        solutionName: options.solutionName,
+        industry: options.industry,
+      });
+      const roiSection = roiCalculator.generateReport(roiResult);
+      enhancedReport += '\n\n' + roiSection;
+      console.log('[Reporter] 添加了 ROI 分析章节');
+    } catch (error) {
+      console.warn('[Reporter] ROI 分析生成失败:', error);
+    }
+  }
+
+  // 4. 添加实施计划（可选）
+  if (options?.enableImplementation && options.solutionName) {
+    console.log('[Reporter] 生成实施计划...');
+    try {
+      const planner = createImplementationPlanner();
+      const plan = await planner.generate({
+        solutionName: options.solutionName,
+        industry: options.industry,
+      });
+      const planSection = planner.generateReport(plan);
+      enhancedReport += '\n\n' + planSection;
+      console.log('[Reporter] 添加了实施计划章节');
+    } catch (error) {
+      console.warn('[Reporter] 实施计划生成失败:', error);
+    }
+  }
+
+  return enhancedReport;
 }
 
 /**

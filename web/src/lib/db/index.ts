@@ -364,8 +364,6 @@ function initDatabase() {
     { id: 'rss-wired', name: 'Wired', type: 'rss-wired', description: '深度科技报道', config: '{}', is_free: 1 },
     { id: 'rss-producthunt', name: 'Product Hunt', type: 'rss-producthunt', description: '新产品发布平台', config: '{}', is_free: 1 },
     { id: 'rss-cnblogs', name: '博客园', type: 'rss-cnblogs', description: '国内开发者社区', config: '{}', is_free: 1 },
-    // Hacker News API
-    { id: 'hackernews-api', name: 'Hacker News API', type: 'hackernews-api', description: '官方 API 搜索（英文）', config: '{}', is_free: 1 },
     // SearXNG 自托管搜索
     { id: 'searxng', name: 'SearXNG', type: 'searxng', description: '自托管搜索引擎聚合', config: '{"baseUrl": "http://192.168.0.125:18888"}', is_free: 1 },
   ];

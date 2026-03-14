@@ -22,6 +22,8 @@ export interface LLMConfig {
   modelName: string | null;
   temperature: number;
   timeout: number;
+  maxTokens?: number;  // 新增：最大输出 tokens
+  enableStructuredOutput?: boolean;
 }
 
 export interface LLMMessage {
@@ -46,7 +48,14 @@ const DEFAULT_CONFIG: LLMConfig = {
   modelName: '',
   temperature: 0.7,
   timeout: 300,
+  maxTokens: 262144,  // 默认最大输出 tokens（匹配模型支持的最大值）
+  enableStructuredOutput: true,
 };
+
+function supportsResponseFormat(provider: string): boolean {
+  // Anthropic/Gemini 使用非 OpenAI 兼容结构，暂不注入 response_format
+  return provider !== 'anthropic' && provider !== 'gemini';
+}
 
 /**
  * 获取当前 LLM 配置
@@ -194,6 +203,7 @@ export async function callLLM(
     modelName?: string;
     temperature?: number;
     maxTokens?: number;
+    jsonMode?: boolean;
   }
 ): Promise<LLMResponse> {
   const config = getLLMConfig();
@@ -219,8 +229,17 @@ export async function callLLM(
     ...messageFormat,
     model: modelName,
     temperature,
-    max_tokens: options?.maxTokens || 4096,
+    max_tokens: options?.maxTokens ?? config.maxTokens ?? 8192,
   };
+
+  const shouldUseStructuredOutput =
+    !!options?.jsonMode &&
+    !!config.enableStructuredOutput &&
+    supportsResponseFormat(config.provider);
+
+  if (shouldUseStructuredOutput) {
+    body.response_format = { type: 'json_object' };
+  }
 
   // Gemini 使用不同端点
   if (config.provider === 'gemini') {
@@ -235,7 +254,7 @@ export async function callLLM(
 
     console.log(`[LLM] Request body:`, JSON.stringify(body, null, 2).substring(0, 500));
 
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
@@ -248,6 +267,34 @@ export async function callLLM(
 
     if (!res.ok) {
       const errorText = await res.text();
+
+      // 某些兼容端点不支持 response_format，自动降级重试一次
+      if (shouldUseStructuredOutput && (res.status === 400 || res.status === 422)) {
+        const fallbackBody = { ...body };
+        delete fallbackBody.response_format;
+
+        console.warn('[LLM] response_format unsupported, retrying without structured output');
+
+        res = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(fallbackBody),
+          signal: controller.signal,
+        });
+
+        if (res.ok) {
+          const fallbackData = await res.json() as Record<string, unknown>;
+          const fallbackResponse = parseResponse(fallbackData, config.provider);
+          console.log(`[LLM] Parsed response length: ${fallbackResponse.content.length}`);
+          console.log(`[LLM] Response preview: ${fallbackResponse.content.substring(0, 200).replace(/\n/g, ' ')}`);
+          return fallbackResponse;
+        }
+
+        const fallbackErrorText = await res.text();
+        console.error('[LLM] Fallback API error details:', fallbackErrorText.substring(0, 1000));
+        throw new Error(`LLM API error: ${res.status} - ${fallbackErrorText}`);
+      }
+
       console.error(`[LLM] API error details:`, errorText.substring(0, 1000));
       throw new Error(`LLM API error: ${res.status} - ${errorText}`);
     }
@@ -273,6 +320,7 @@ export async function generateText(
     modelName?: string;
     temperature?: number;
     maxTokens?: number;
+    jsonMode?: boolean;
   }
 ): Promise<string> {
   const messages: LLMMessage[] = [];

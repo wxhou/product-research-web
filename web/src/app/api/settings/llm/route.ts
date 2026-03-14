@@ -9,6 +9,8 @@ interface LLMConfig {
   modelName: string | null;
   temperature: number;
   timeout: number;
+  maxTokens?: number;
+  enableStructuredOutput?: boolean;
 }
 
 // GET /api/settings/llm
@@ -44,6 +46,8 @@ export async function GET() {
         modelName: defaultConfig.modelName,
         temperature: defaultConfig.temperature,
         timeout: defaultConfig.timeout,
+        maxTokens: defaultConfig.maxTokens,
+        enableStructuredOutput: defaultConfig.enableStructuredOutput,
       },
     });
   } catch (error) {
@@ -59,7 +63,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { provider, baseUrl, apiKey, modelName, temperature, timeout } = body as Partial<LLMConfig>;
+    const { provider, baseUrl, apiKey, modelName, temperature, timeout, maxTokens, enableStructuredOutput } = body as Partial<LLMConfig>;
 
     // 验证输入
     const validProviders = ['openai', 'azure', 'anthropic', 'deepseek', 'gemini', 'moonshot', 'modelscope', 'siliconflow', 'compatible', 'ollama'];
@@ -80,6 +84,13 @@ export async function POST(request: NextRequest) {
     if (timeout !== undefined && (isNaN(timeout) || timeout < 30 || timeout > 600)) {
       return NextResponse.json(
         { success: false, error: 'Timeout must be between 30 and 600 seconds' },
+        { status: 400 }
+      );
+    }
+
+    if (maxTokens !== undefined && (isNaN(maxTokens) || maxTokens < 256 || maxTokens > 100000)) {
+      return NextResponse.json(
+        { success: false, error: 'maxTokens must be between 256 and 100000' },
         { status: 400 }
       );
     }
@@ -106,6 +117,8 @@ export async function POST(request: NextRequest) {
       modelName: modelName || existingConfig?.modelName || getLLMConfig().modelName,
       temperature: temperature || existingConfig?.temperature || getLLMConfig().temperature,
       timeout: timeout || existingConfig?.timeout || getLLMConfig().timeout,
+      maxTokens: maxTokens || existingConfig?.maxTokens || getLLMConfig().maxTokens,
+      enableStructuredOutput: enableStructuredOutput ?? existingConfig?.enableStructuredOutput ?? getLLMConfig().enableStructuredOutput,
     };
 
     settingsDb.set.run({

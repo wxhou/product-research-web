@@ -5,8 +5,15 @@
  */
 
 import { generateText } from '../../../llm';
-import { parseJsonFromLLM } from '@/lib/json-utils';
-import type { AnalysisResult } from '../../types';
+import { parseJsonWithRetry } from '@/lib/json-utils';
+import type {
+  AnalysisResult,
+  FeatureAnalysis,
+  CompetitorAnalysis,
+  KPIMetric,
+  RiskItem,
+  VendorInfo,
+} from '../../types';
 import {
   PHASE_FEATURE_PROMPT,
   PHASE_COMPETITOR_PROMPT,
@@ -59,7 +66,28 @@ export const ENHANCED_ANALYSIS_PROMPT = `
 
 ## 输出要求
 请在分析报告中明确包含以上五个维度的内容，使用结构化 JSON 格式输出。
+必须只输出纯 JSON 对象，不要输出解释文字、前言或 Markdown 代码块。
 `;
+
+function toRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return {};
+}
+
+function toArray<T = unknown>(value: unknown): T[] {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  return Array.isArray(value) ? (value as T[]) : [value as T];
+}
+
+function toStringValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
+}
 
 /**
  * 阶段执行上下文
@@ -108,10 +136,26 @@ export class PhaseController {
   async executePhases(context: PhaseContext): Promise<PhaseResult[]> {
     const results: PhaseResult[] = [];
     const enabledPhases = this.phases.filter(p => p.enabled);
+    let existingAnalysis = context.existingAnalysis || '';
 
     for (const phase of enabledPhases) {
-      const result = await this.executePhase(phase.id, context);
+      const result = await this.executePhase(phase.id, {
+        ...context,
+        existingAnalysis,
+      });
       results.push(result);
+
+      // 将已成功阶段的结构化结果传递给后续阶段（尤其是 strategy）
+      if (result.success && result.data) {
+        try {
+          const snippet = JSON.stringify(result.data);
+          if (snippet.length > 0) {
+            existingAnalysis = `${existingAnalysis}\n${snippet}`.trim().slice(-12000);
+          }
+        } catch {
+          // ignore serialization failure
+        }
+      }
     }
 
     return results;
@@ -123,27 +167,29 @@ export class PhaseController {
   private async executePhase(phaseId: string, context: PhaseContext): Promise<PhaseResult> {
     const prompt = this.buildPrompt(phaseId, context);
 
-    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
-      try {
-        const responseText = await generateText(prompt);
-        const data = this.parseResponse(responseText);
+    try {
+      // 统一走带重试的 JSON 生成与解析链路，避免单次解析失败导致阶段结果为空
+      const data = await parseJsonWithRetry<Record<string, unknown>>(
+        (p, maxTokens) => generateText(p, undefined, { maxTokens, jsonMode: true }),
+        prompt,
+        this.maxRetries,
+        16384
+      );
 
-        return {
-          phaseId,
-          success: true,
-          data,
-          confidenceScore: data.confidenceScore || 0.5,
-        };
-      } catch (error) {
-        console.warn(`[PhaseController] Phase ${phaseId} attempt ${attempt} failed:`, error);
-      }
+      return {
+        phaseId,
+        success: true,
+        data,
+        confidenceScore: (data.confidenceScore as number) || 0.5,
+      };
+    } catch (error) {
+      console.warn(`[PhaseController] Phase ${phaseId} failed after ${this.maxRetries} retries:`, error);
+      return {
+        phaseId,
+        success: false,
+        error: `Phase ${phaseId} failed after ${this.maxRetries} attempts`,
+      };
     }
-
-    return {
-      phaseId,
-      success: false,
-      error: `Phase ${phaseId} failed after ${this.maxRetries} attempts`,
-    };
   }
 
   /**
@@ -175,18 +221,6 @@ export class PhaseController {
     prompt = prompt + '\n\n' + ENHANCED_ANALYSIS_PROMPT;
 
     return prompt;
-  }
-
-  /**
-   * 解析 LLM 响应
-   */
-  private parseResponse(responseText: string): any {
-    // 使用健壮的 JSON 解析
-    const result = parseJsonFromLLM(responseText);
-    if (result) {
-      return result;
-    }
-    return {};
   }
 
   /**
@@ -226,75 +260,80 @@ export class PhaseController {
         continue;
       }
 
-      const data = result.data || {};
+      const data = toRecord(result.data);
       totalConfidence += result.confidenceScore || 0.5;
       successCount++;
 
       // 合并功能数据
       if (data.features) {
-        merged.features = [...(merged.features || []), ...data.features];
+        merged.features = [...(merged.features || []), ...toArray<FeatureAnalysis>(data.features)];
       }
 
       // 合并竞品数据
       if (data.competitors) {
-        merged.competitors = [...(merged.competitors || []), ...data.competitors];
+        merged.competitors = [...(merged.competitors || []), ...toArray<CompetitorAnalysis>(data.competitors)];
       }
 
       // 合并 SWOT
       if (data.swot) {
+        const swotData = toRecord(data.swot);
         const swot = merged.swot!;
-        swot.strengths = [...swot.strengths, ...(data.swot.strengths || [])];
-        swot.weaknesses = [...swot.weaknesses, ...(data.swot.weaknesses || [])];
-        swot.opportunities = [...swot.opportunities, ...(data.swot.opportunities || [])];
-        swot.threats = [...swot.threats, ...(data.swot.threats || [])];
+        swot.strengths = [...swot.strengths, ...toArray<string>(swotData.strengths)];
+        swot.weaknesses = [...swot.weaknesses, ...toArray<string>(swotData.weaknesses)];
+        swot.opportunities = [...swot.opportunities, ...toArray<string>(swotData.opportunities)];
+        swot.threats = [...swot.threats, ...toArray<string>(swotData.threats)];
       }
 
       // 合并市场数据
       if (data.marketData) {
+        const incomingMarket = toRecord(data.marketData);
         const marketData = merged.marketData!;
-        marketData.marketSize = data.marketData.marketSize || marketData.marketSize;
-        marketData.growthRate = data.marketData.growthRate || marketData.growthRate;
-        marketData.keyPlayers = [...(marketData.keyPlayers || []), ...(data.marketData.keyPlayers || [])];
-        marketData.trends = [...(marketData.trends || []), ...(data.marketData.trends || [])];
-        marketData.opportunities = [...(marketData.opportunities || []), ...(data.marketData.opportunities || [])];
-        marketData.challenges = [...(marketData.challenges || []), ...(data.marketData.challenges || [])];
+        marketData.marketSize = toStringValue(incomingMarket.marketSize) || marketData.marketSize;
+        marketData.growthRate = toStringValue(incomingMarket.growthRate) || marketData.growthRate;
+        marketData.keyPlayers = [...(marketData.keyPlayers || []), ...toArray<string>(incomingMarket.keyPlayers)];
+        marketData.trends = [...(marketData.trends || []), ...toArray<string>(incomingMarket.trends)];
+        marketData.opportunities = [...(marketData.opportunities || []), ...toArray<string>(incomingMarket.opportunities)];
+        marketData.challenges = [...(marketData.challenges || []), ...toArray<string>(incomingMarket.challenges)];
       }
 
       // 合并技术栈
       if (data.techStack) {
+        const incomingTech = toRecord(data.techStack);
         const tech = merged.techAnalysis!;
-        tech.architecture = [...(tech.architecture || []), ...(data.techStack.architecture || [])];
-        tech.techStack = [...(tech.techStack || []), ...(data.techStack.techStack || [])];
-        tech.emergingTech = [...(tech.emergingTech || []), ...(data.techStack.emergingTech || [])];
-        tech.innovationPoints = [...(tech.innovationPoints || []), ...(data.techStack.innovationPoints || [])];
+        tech.architecture = [...(tech.architecture || []), ...toArray<string>(incomingTech.architecture)];
+        tech.techStack = [...(tech.techStack || []), ...toArray<string>(incomingTech.techStack)];
+        tech.emergingTech = [...(tech.emergingTech || []), ...toArray<string>(incomingTech.emergingTech)];
+        tech.innovationPoints = [...(tech.innovationPoints || []), ...toArray<string>(incomingTech.innovationPoints)];
       }
 
       // 合并增强分析数据（用户画像、ROI、KPI、风险矩阵、供应商对比）
       if (data.userPersonaAnalysis) {
+        const incomingUpa = toRecord(data.userPersonaAnalysis);
         const upa = merged.userPersonaAnalysis!;
-        upa.decisionMakers = [...(upa.decisionMakers || []), ...(data.userPersonaAnalysis.decisionMakers || [])];
-        upa.users = [...(upa.users || []), ...(data.userPersonaAnalysis.users || [])];
-        upa.beneficiaries = [...(upa.beneficiaries || []), ...(data.userPersonaAnalysis.beneficiaries || [])];
+        upa.decisionMakers = [...(upa.decisionMakers || []), ...toArray<string>(incomingUpa.decisionMakers)];
+        upa.users = [...(upa.users || []), ...toArray<string>(incomingUpa.users)];
+        upa.beneficiaries = [...(upa.beneficiaries || []), ...toArray<string>(incomingUpa.beneficiaries)];
       }
 
       if (data.roiAnalysis) {
+        const incomingRoi = toRecord(data.roiAnalysis);
         merged.roiAnalysis = {
-          costComparison: data.roiAnalysis.costComparison || merged.roiAnalysis?.costComparison || '',
-          paybackPeriod: data.roiAnalysis.paybackPeriod || merged.roiAnalysis?.paybackPeriod || '',
-          roi: data.roiAnalysis.roi || merged.roiAnalysis?.roi || '',
+          costComparison: toStringValue(incomingRoi.costComparison) || merged.roiAnalysis?.costComparison || '',
+          paybackPeriod: toStringValue(incomingRoi.paybackPeriod) || merged.roiAnalysis?.paybackPeriod || '',
+          roi: toStringValue(incomingRoi.roi) || merged.roiAnalysis?.roi || '',
         };
       }
 
       if (data.kpiMetrics) {
-        merged.kpiMetrics = [...(merged.kpiMetrics || []), ...data.kpiMetrics];
+        merged.kpiMetrics = [...(merged.kpiMetrics || []), ...toArray<KPIMetric>(data.kpiMetrics)];
       }
 
       if (data.riskMatrix) {
-        merged.riskMatrix = [...(merged.riskMatrix || []), ...data.riskMatrix];
+        merged.riskMatrix = [...(merged.riskMatrix || []), ...toArray<RiskItem>(data.riskMatrix)];
       }
 
       if (data.vendorComparison) {
-        merged.vendorComparison = [...(merged.vendorComparison || []), ...data.vendorComparison];
+        merged.vendorComparison = [...(merged.vendorComparison || []), ...toArray<VendorInfo>(data.vendorComparison)];
       }
     }
 
